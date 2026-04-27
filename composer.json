@@ -1,0 +1,24 @@
+{
+	"name": "beenacle/partner-program",
+	"description": "White-label affiliate / partner program for WooCommerce by Beenacle.",
+	"type": "wordpress-plugin",
+	"license": "GPL-2.0-or-later",
+	"homepage": "https://beenacle.com",
+	"authors": [
+		{
+			"name": "Beenacle",
+			"homepage": "https://beenacle.com"
+		}
+	],
+	"require": {
+		"php": ">=7.4"
+	},
+	"autoload": {
+		"psr-4": {
+			"PartnerProgram\\": "src/"
+		}
+	},
+	"config": {
+		"sort-packages": true
+	}
+}

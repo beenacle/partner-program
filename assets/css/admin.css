@@ -1,0 +1,5 @@
+.pp-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-top: 1rem; }
+.pp-card { background: #fff; border: 1px solid #dcdcde; border-radius: 8px; padding: 1rem; }
+.pp-card-title { color: #50575e; font-size: .85rem; text-transform: uppercase; letter-spacing: .05em; }
+.pp-card-value { font-size: 1.5rem; font-weight: 700; margin: .25rem 0; color: #1d2327; }
+.pp-card-sub { color: #50575e; font-size: .85rem; }
