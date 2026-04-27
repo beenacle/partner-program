@@ -6,11 +6,11 @@
 #   bin/build-release.sh 1.2.3          # overrides version (also rewrites in-file)
 #
 # Outputs:
-#   dist/partner-program.zip            # canonical name (always overwritten)
-#   dist/partner-program-<version>.zip  # versioned copy
+#   dist/partner-program.zip            # canonical, always overwritten
 #
 # The zip's TOP-LEVEL folder is always `partner-program/` (no version) so it can
 # be installed as a drop-in via the WP plugin uploader and updated in place.
+# Version is encoded in the release tag, not the filename.
 
 set -euo pipefail
 
@@ -72,19 +72,11 @@ rsync -a \
   --exclude='composer.lock' \
   ./ "$STAGE_DIR/$PLUGIN_SLUG/"
 
-# Build the canonical (no-version) zip first.
 CANON_ZIP="${DIST_DIR}/${PLUGIN_SLUG}.zip"
 rm -f "$CANON_ZIP"
 ( cd "$STAGE_DIR" && zip -qr "$CANON_ZIP" "$PLUGIN_SLUG" )
 
-# Versioned copy for archival / GitHub release asset.
-VER_ZIP="${DIST_DIR}/${PLUGIN_SLUG}-${VERSION}.zip"
-cp "$CANON_ZIP" "$VER_ZIP"
-
 echo
-echo "Created:"
-echo "  $CANON_ZIP"
-echo "  $VER_ZIP"
-echo
+echo "Created: $CANON_ZIP"
 echo "Top-level folder inside zip:"
 unzip -l "$CANON_ZIP" | awk 'NR==4 {print "  " $4}'

@@ -108,7 +108,5 @@ jobs:
           tag_name: ${{ steps.meta.outputs.tag }}
           name: ${{ steps.meta.outputs.tag }}
           body_path: release-notes.md
-          files: |
-            dist/partner-program.zip
-            dist/partner-program-${{ steps.meta.outputs.version }}.zip
+          files: dist/partner-program.zip
           fail_on_unmatched_files: true

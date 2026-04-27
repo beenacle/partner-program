@@ -97,7 +97,7 @@ define( 'PARTNER_PROGRAM_GITHUB_TOKEN', 'ghp_...' ); // only for private repos
    git tag -a v1.1.0 -m "v1.1.0"
    git push --follow-tags
    ```
-3. The `Release` GitHub Actions workflow runs on the tag push: it lints PHP, verifies the tag matches the in-file version, builds `dist/partner-program.zip` + `dist/partner-program-<version>.zip`, and creates the GitHub release with both zips attached and auto-generated notes.
+3. The `Release` GitHub Actions workflow runs on the tag push: it lints PHP, verifies the tag matches the in-file version, builds `dist/partner-program.zip`, and creates the GitHub release with the zip attached and auto-generated notes from the commit log. The version is encoded in the release tag, not the zip filename.
 
 The zip's top-level folder is always `partner-program/` (no version suffix), so installs and in-place WordPress updates work without renaming.
 
