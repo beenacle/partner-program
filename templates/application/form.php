@@ -42,8 +42,17 @@ $program = (string) $settings->get( 'general.program_name', __( 'Partner Program
 				<?php elseif ( 'select' === $type ) : ?>
 					<select id="pp_<?php echo esc_attr( $key ); ?>" name="<?php echo esc_attr( $key ); ?>" <?php echo $required ? 'required' : ''; ?>>
 						<option value=""><?php esc_html_e( '— Select —', 'partner-program' ); ?></option>
-						<?php foreach ( (array) ( $f['options'] ?? [] ) as $opt ) : ?>
-							<option value="<?php echo esc_attr( (string) $opt ); ?>"><?php echo esc_html( (string) $opt ); ?></option>
+						<?php foreach ( (array) ( $f['options'] ?? [] ) as $opt_key => $opt ) :
+							if ( is_array( $opt ) ) {
+								$opt_value = (string) ( $opt['value'] ?? $opt_key );
+								$opt_label = (string) ( $opt['label'] ?? $opt_value );
+							} else {
+								$opt_value = (string) $opt;
+								// Legacy flat shape: humanize the key for display.
+								$opt_label = ucwords( str_replace( [ '_', '-' ], ' ', $opt_value ) );
+							}
+							?>
+							<option value="<?php echo esc_attr( $opt_value ); ?>"><?php echo esc_html( $opt_label ); ?></option>
 						<?php endforeach; ?>
 					</select>
 				<?php elseif ( 'checkbox' === $type ) : ?>

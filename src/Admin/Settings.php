@@ -473,17 +473,33 @@ final class Settings {
 
 			case 'application':
 				$rows  = isset( $_POST['fields'] ) && is_array( $_POST['fields'] ) ? wp_unslash( (array) $_POST['fields'] ) : [];
+				// Index existing fields by key so we can preserve per-field metadata
+				// (e.g. select `options`) that the admin UI doesn't currently expose.
+				$existing_by_key = [];
+				foreach ( (array) $repo->get( 'application.fields', [] ) as $existing ) {
+					$existing_key = isset( $existing['key'] ) ? (string) $existing['key'] : '';
+					if ( '' !== $existing_key ) {
+						$existing_by_key[ $existing_key ] = $existing;
+					}
+				}
 				$clean = [];
 				foreach ( $rows as $row ) {
 					if ( ! is_array( $row ) ) { continue; }
 					$key = sanitize_key( (string) ( $row['key'] ?? '' ) );
 					if ( '' === $key ) { continue; }
-					$clean[] = [
+					$field = [
 						'key'      => $key,
 						'label'    => sanitize_text_field( (string) ( $row['label'] ?? $key ) ),
 						'type'     => sanitize_key( (string) ( $row['type'] ?? 'text' ) ),
 						'required' => ! empty( $row['required'] ),
 					];
+					// Carry over options (and any other unmanaged keys) from the
+					// previously-saved field with the same key so re-saving doesn't
+					// silently wipe select choices.
+					if ( isset( $existing_by_key[ $key ]['options'] ) ) {
+						$field['options'] = $existing_by_key[ $key ]['options'];
+					}
+					$clean[] = $field;
 				}
 				$repo->save_section( 'application', [
 					'fields' => $clean,
