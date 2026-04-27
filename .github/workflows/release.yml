@@ -1,0 +1,114 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to (re)build, e.g. v1.0.0. Must already exist.'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          coverage: none
+          tools: none
+
+      - name: Resolve tag and version
+        id: meta
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          FILE_VERSION=$(grep -E "^[[:space:]]*\*[[:space:]]*Version:" partner-program.php | head -1 | awk '{print $3}')
+          DEFINE_VERSION=$(grep -oE "PARTNER_PROGRAM_VERSION'[^']+'[^']+" partner-program.php | sed -E "s/.*, *'([^']+)'.*/\1/")
+          echo "tag=$TAG"            >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION"    >> "$GITHUB_OUTPUT"
+          echo "Tag:            $TAG"
+          echo "Version (tag):  $VERSION"
+          echo "Header version: $FILE_VERSION"
+          echo "Define version: $DEFINE_VERSION"
+          if [[ "$VERSION" != "$FILE_VERSION" ]]; then
+            echo "::error::Tag version ($VERSION) does not match Version: header ($FILE_VERSION) in partner-program.php"
+            exit 1
+          fi
+          if [[ "$VERSION" != "$DEFINE_VERSION" ]]; then
+            echo "::error::Tag version ($VERSION) does not match PARTNER_PROGRAM_VERSION define ($DEFINE_VERSION) in partner-program.php"
+            exit 1
+          fi
+
+      - name: PHP lint
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r -d '' f; do
+            if ! php -l "$f" >/dev/null 2>err.log; then
+              echo "::error file=$f::$(cat err.log)"
+              fail=1
+            fi
+          done < <(find . -path ./vendor -prune -o -path ./node_modules -prune -o -name '*.php' -print0)
+          exit $fail
+
+      - name: Build release zips
+        run: bin/build-release.sh
+
+      - name: Verify zip layout
+        run: |
+          unzip -l dist/partner-program.zip | head -20
+          TOP=$(unzip -Z1 dist/partner-program.zip | head -1)
+          if [[ "$TOP" != "partner-program/" ]]; then
+            echo "::error::Top-level folder in zip is '$TOP', expected 'partner-program/'"
+            exit 1
+          fi
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          PREV=$(git tag --list 'v*' --sort=-v:refname | grep -v "^${TAG}$" | head -1 || true)
+          {
+            echo "## What's changed"
+            echo
+            if [[ -n "$PREV" ]]; then
+              git log --pretty=format:"- %s (%h)" "${PREV}..${TAG}"
+            else
+              git log --pretty=format:"- %s (%h)"
+            fi
+            echo
+            echo
+            echo "## Install"
+            echo "Download \`partner-program.zip\` and upload it under **Plugins → Add New → Upload Plugin**. Sites already running this plugin will receive the update automatically via the built-in GitHub Releases updater."
+            if [[ -n "$PREV" ]]; then
+              echo
+              echo "**Full diff:** https://github.com/${{ github.repository }}/compare/${PREV}...${TAG}"
+            fi
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          body_path: release-notes.md
+          files: |
+            dist/partner-program.zip
+            dist/partner-program-${{ steps.meta.outputs.version }}.zip
+          fail_on_unmatched_files: true

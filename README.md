@@ -77,6 +77,30 @@ partner_program_payout_paid
 partner_program_violation_flagged
 ```
 
+## Updates
+
+The plugin ships with a built-in updater that polls this repo's GitHub releases. Sites running the plugin will see "Update available" in the WordPress admin within a few hours of each new release (or instantly via *Dashboard → Updates → Check Again*).
+
+To point a site at a fork instead of this repo, define in `wp-config.php`:
+
+```php
+define( 'PARTNER_PROGRAM_GITHUB_REPO', 'your-org/your-fork' );
+define( 'PARTNER_PROGRAM_GITHUB_TOKEN', 'ghp_...' ); // only for private repos
+```
+
+## Releasing (maintainers)
+
+1. Bump the version in `partner-program.php` (Version header + `PARTNER_PROGRAM_VERSION` define) and `readme.txt` Stable tag. The build script can do this for you: `bin/build-release.sh 1.1.0`.
+2. Commit, tag, push:
+   ```bash
+   git commit -am "Release 1.1.0"
+   git tag -a v1.1.0 -m "v1.1.0"
+   git push --follow-tags
+   ```
+3. The `Release` GitHub Actions workflow runs on the tag push: it lints PHP, verifies the tag matches the in-file version, builds `dist/partner-program.zip` + `dist/partner-program-<version>.zip`, and creates the GitHub release with both zips attached and auto-generated notes.
+
+The zip's top-level folder is always `partner-program/` (no version suffix), so installs and in-place WordPress updates work without renaming.
+
 ## License
 
 GPL-2.0-or-later. See [LICENSE](LICENSE).
