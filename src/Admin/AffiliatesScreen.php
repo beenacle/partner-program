@@ -10,6 +10,7 @@ declare( strict_types = 1 );
 namespace PartnerProgram\Admin;
 
 use PartnerProgram\Domain\AffiliateRepo;
+use PartnerProgram\Domain\CommissionRepo;
 use PartnerProgram\Domain\TierResolver;
 use PartnerProgram\Support\Capabilities;
 use PartnerProgram\Support\Money;
@@ -54,11 +55,17 @@ final class AffiliatesScreen {
 			. '<th>' . esc_html__( 'Actions', 'partner-program' ) . '</th>'
 			. '</tr></thead><tbody>';
 
+		// One grouped query for the whole page instead of N×3 (pending /
+		// approved / paid) round-trips.
+		$ids  = array_map( static fn ( array $r ): int => (int) $r['id'], $rows );
+		$sums = CommissionRepo::sums_for_affiliates( $ids );
+
 		foreach ( $rows as $row ) {
 			$user      = get_userdata( (int) $row['user_id'] );
-			$pending   = \PartnerProgram\Domain\CommissionRepo::sum_for_affiliate( (int) $row['id'], 'pending' );
-			$approved  = \PartnerProgram\Domain\CommissionRepo::sum_for_affiliate( (int) $row['id'], 'approved' );
-			$paid      = \PartnerProgram\Domain\CommissionRepo::sum_for_affiliate( (int) $row['id'], 'paid' );
+			$totals    = $sums[ (int) $row['id'] ] ?? [ 'pending' => 0, 'approved' => 0, 'paid' => 0 ];
+			$pending   = $totals['pending'];
+			$approved  = $totals['approved'];
+			$paid      = $totals['paid'];
 			$nonce     = wp_create_nonce( 'pp_affiliate_action_' . $row['id'] );
 
 			echo '<tr>';

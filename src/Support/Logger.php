@@ -48,4 +48,34 @@ final class Logger {
 	public function error( string $msg, string $channel = 'general', array $ctx = [] ): void {
 		$this->log( $msg, $channel, 'error', null, null, $ctx );
 	}
+
+	/**
+	 * Delete log rows older than $days. Returns the number of rows actually
+	 * removed. $days <= 0 means "keep forever" — caller is expected to
+	 * pre-check the retention setting in that case; we still bail out
+	 * defensively here so a misconfigured cron can never wipe the table.
+	 */
+	public static function prune_older_than( int $days ): int {
+		if ( $days <= 0 ) {
+			return 0;
+		}
+		global $wpdb;
+		$cutoff = gmdate( 'Y-m-d H:i:s', time() - ( $days * DAY_IN_SECONDS ) );
+		$table  = $wpdb->prefix . 'pp_logs';
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE created_at < %s", $cutoff ) );
+		return (int) $wpdb->rows_affected;
+	}
+
+	/**
+	 * Cron entry-point. Pulls retention from settings and short-circuits
+	 * when retention_days is 0 (keep forever).
+	 */
+	public static function run_scheduled_prune(): void {
+		$repo = new SettingsRepo();
+		$days = (int) $repo->get( 'logs.retention_days', 90 );
+		if ( $days > 0 ) {
+			self::prune_older_than( $days );
+		}
+	}
 }

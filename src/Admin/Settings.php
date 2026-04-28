@@ -41,6 +41,7 @@ final class Settings {
 			'application'  => __( 'Application Form', 'partner-program' ),
 			'compliance'   => __( 'Compliance', 'partner-program' ),
 			'exclusions'   => __( 'Exclusions', 'partner-program' ),
+			'logs'         => __( 'Logs', 'partner-program' ),
 			'iotools'      => __( 'Import / Export', 'partner-program' ),
 		];
 		$active = isset( $_GET['tab'] ) ? sanitize_key( (string) $_GET['tab'] ) : 'general'; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
@@ -87,6 +88,7 @@ final class Settings {
 			case 'application':   self::tab_application( $settings ); break;
 			case 'compliance':    self::tab_compliance( $settings ); break;
 			case 'exclusions':    self::tab_exclusions( $settings ); break;
+			case 'logs':          self::tab_logs( $settings ); break;
 		}
 
 		submit_button();
@@ -219,12 +221,35 @@ final class Settings {
 		self::field_text( 'param', __( 'URL parameter', 'partner-program' ), (string) $s->get( 'tracking.param' ) );
 		self::field_text( 'rewrite_slug', __( 'Pretty rewrite slug (optional)', 'partner-program' ), (string) $s->get( 'tracking.rewrite_slug' ) );
 		self::field_checkbox(
+			'trust_proxy_header',
+			__( 'Trust proxy headers for visitor IP', 'partner-program' ),
+			(bool) $s->get( 'tracking.trust_proxy_header', false ),
+			__( 'Read CF-Connecting-IP / X-Forwarded-For when resolving the client IP. Only enable if your site is behind a trusted proxy or CDN; otherwise visitors can spoof their IP.', 'partner-program' )
+		);
+		self::field_checkbox(
 			'attribution_subscription_renewals',
 			__( 'Inherit attribution onto subscription renewals', 'partner-program' ),
 			(bool) $s->get( 'attribution.subscription_renewals', true ),
 			__( 'Only applies when WooCommerce Subscriptions is active.', 'partner-program' )
 		);
 		echo '</table>';
+	}
+
+	private static function tab_logs( SettingsRepo $s ): void {
+		echo '<table class="form-table">';
+		self::field_text(
+			'logs_retention_days',
+			__( 'Retention (days)', 'partner-program' ),
+			(string) $s->get( 'logs.retention_days', 90 ),
+			__( 'Audit-log rows older than this are pruned daily. Set to 0 to keep everything.', 'partner-program' ),
+			'number'
+		);
+		echo '</table>';
+		printf(
+			'<p><a href="%s">%s</a></p>',
+			esc_url( admin_url( 'admin.php?page=partner-program-logs' ) ),
+			esc_html__( 'View logs and prune now →', 'partner-program' )
+		);
 	}
 
 	private static function tab_hold_payouts( SettingsRepo $s ): void {
@@ -448,10 +473,11 @@ final class Settings {
 
 			case 'tracking':
 				$repo->save_section( 'tracking', [
-					'cookie_name'     => sanitize_text_field( (string) ( $_POST['cookie_name'] ?? 'pp_ref' ) ),
-					'cookie_lifetime' => max( 1, (int) ( $_POST['cookie_lifetime'] ?? 30 ) ),
-					'param'           => sanitize_key( (string) ( $_POST['param'] ?? 'ref' ) ),
-					'rewrite_slug'    => sanitize_title( (string) ( $_POST['rewrite_slug'] ?? '' ) ),
+					'cookie_name'        => sanitize_text_field( (string) ( $_POST['cookie_name'] ?? 'pp_ref' ) ),
+					'cookie_lifetime'    => max( 1, (int) ( $_POST['cookie_lifetime'] ?? 30 ) ),
+					'param'              => sanitize_key( (string) ( $_POST['param'] ?? 'ref' ) ),
+					'rewrite_slug'       => sanitize_title( (string) ( $_POST['rewrite_slug'] ?? '' ) ),
+					'trust_proxy_header' => ! empty( $_POST['trust_proxy_header'] ),
 				] );
 				$repo->save_section( 'attribution', [
 					'subscription_renewals' => ! empty( $_POST['attribution_subscription_renewals'] ),
@@ -532,6 +558,12 @@ final class Settings {
 					'reject_failed'       => ! empty( $_POST['reject_failed'] ),
 					'fraud_meta_key'      => sanitize_text_field( (string) ( $_POST['fraud_meta_key'] ?? '' ) ),
 					'compliance_meta_key' => sanitize_text_field( (string) ( $_POST['compliance_meta_key'] ?? '' ) ),
+				] );
+				break;
+
+			case 'logs':
+				$repo->save_section( 'logs', [
+					'retention_days' => max( 0, (int) ( $_POST['logs_retention_days'] ?? 90 ) ),
 				] );
 				break;
 

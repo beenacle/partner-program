@@ -67,6 +67,7 @@ final class Plugin {
 		add_action( 'admin_init', [ $this, 'maybe_run_upgrades' ] );
 		add_action( 'partner_program_release_holds', [ HoldReleaser::class, 'release_due' ] );
 		add_action( 'partner_program_recalculate_tiers', [ TierResolver::class, 'recalculate_all' ] );
+		add_action( 'partner_program_prune_logs', [ Logger::class, 'run_scheduled_prune' ] );
 
 		$this->boot_subsystems();
 
@@ -97,6 +98,10 @@ final class Plugin {
 		// (not just activation) so admins don't lose access after a plain update.
 		Capabilities::register_role();
 		Capabilities::grant_admin_caps();
+		// New cron events introduced in later releases (e.g. 1.2.0's prune
+		// cron) need scheduling on existing installs that never went through
+		// activate(). The helper is idempotent.
+		Activator::schedule_crons();
 		update_option( 'partner_program_db_version', PARTNER_PROGRAM_VERSION );
 	}
 

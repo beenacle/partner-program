@@ -98,6 +98,11 @@ final class SettingsRepo {
 				'fraud_meta_key'      => '_pp_fraud_risk',
 				'compliance_meta_key' => '_pp_compliance_violation',
 			],
+			'logs'         => [
+				// Days of history to retain in the pp_logs table. 0 = keep
+				// forever; the daily prune cron is a no-op in that case.
+				'retention_days' => 90,
+			],
 		];
 	}
 

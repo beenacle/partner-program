@@ -51,12 +51,22 @@ final class Activator {
 
 		foreach ( $pages as $option_key => $page ) {
 			$existing_id = (int) get_option( $option_key );
-			if ( $existing_id && get_post( $existing_id ) ) {
-				continue;
+			// Only short-circuit when the prior page actually still exists
+			// AND is published. If a site admin trashes / deletes the page,
+			// the option is left dangling and we'd otherwise leave them
+			// without a portal/application/login URL until they manually
+			// re-create the page. Treat trashed/draft/private as "missing"
+			// and recreate cleanly, clearing the stale option first.
+			if ( $existing_id ) {
+				$existing = get_post( $existing_id );
+				if ( $existing && 'publish' === $existing->post_status ) {
+					continue;
+				}
+				delete_option( $option_key );
 			}
 
 			$found = get_page_by_path( $page['slug'] );
-			if ( $found ) {
+			if ( $found && 'publish' === $found->post_status ) {
 				update_option( $option_key, (int) $found->ID );
 				continue;
 			}
@@ -76,17 +86,21 @@ final class Activator {
 		}
 	}
 
-	private static function schedule_crons(): void {
+	public static function schedule_crons(): void {
 		if ( ! wp_next_scheduled( 'partner_program_release_holds' ) ) {
 			wp_schedule_event( time() + HOUR_IN_SECONDS, 'hourly', 'partner_program_release_holds' );
 		}
 		if ( ! wp_next_scheduled( 'partner_program_recalculate_tiers' ) ) {
 			wp_schedule_event( time() + DAY_IN_SECONDS, 'daily', 'partner_program_recalculate_tiers' );
 		}
+		if ( ! wp_next_scheduled( 'partner_program_prune_logs' ) ) {
+			wp_schedule_event( time() + DAY_IN_SECONDS, 'daily', 'partner_program_prune_logs' );
+		}
 	}
 
 	private static function clear_crons(): void {
 		wp_clear_scheduled_hook( 'partner_program_release_holds' );
 		wp_clear_scheduled_hook( 'partner_program_recalculate_tiers' );
+		wp_clear_scheduled_hook( 'partner_program_prune_logs' );
 	}
 }

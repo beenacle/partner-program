@@ -12,6 +12,7 @@ namespace PartnerProgram\Admin;
 use PartnerProgram\Domain\AffiliateRepo;
 use PartnerProgram\Domain\CommissionRepo;
 use PartnerProgram\Domain\PayoutRepo;
+use PartnerProgram\Payouts\PayoutManager;
 use PartnerProgram\Support\Encryption;
 use PartnerProgram\Support\Money;
 
@@ -35,9 +36,33 @@ final class DashboardScreen {
 		$approved_cents = (int) $wpdb->get_var( "SELECT COALESCE(SUM(amount_cents),0) FROM " . CommissionRepo::table() . " WHERE status = 'approved'" );
 		$paid_cents     = (int) $wpdb->get_var( "SELECT COALESCE(SUM(amount_cents),0) FROM " . CommissionRepo::table() . " WHERE status = 'paid'" );
 
-		$queued_payouts = (int) $wpdb->get_var( "SELECT COUNT(*) FROM " . PayoutRepo::table() . " WHERE status = 'queued'" );
+		$queued_payouts    = (int) $wpdb->get_var( "SELECT COUNT(*) FROM " . PayoutRepo::table() . " WHERE status = 'queued'" );
+		$pending_method    = PayoutManager::affiliates_pending_payout_method();
+		$pending_method_n  = count( $pending_method );
 
 		echo '<div class="wrap"><h1>' . esc_html__( 'Partner Program', 'partner-program' ) . '</h1>';
+
+		if ( $pending_method_n > 0 ) {
+			echo '<div class="notice notice-warning"><p><strong>'
+				. esc_html(
+					sprintf(
+						/* translators: %d: number of partners. */
+						_n(
+							'%d partner has earnings ready to pay out but no payout method on file.',
+							'%d partners have earnings ready to pay out but no payout method on file.',
+							$pending_method_n,
+							'partner-program'
+						),
+						$pending_method_n
+					)
+				)
+				. '</strong> '
+				. esc_html__( "They'll be skipped on the next batch run.", 'partner-program' )
+				. ' <a href="' . esc_url( admin_url( 'admin.php?page=partner-program-affiliates' ) ) . '">'
+				. esc_html__( 'View partners', 'partner-program' )
+				. '</a></p></div>';
+		}
+
 		echo '<div class="pp-grid">';
 		self::card( __( 'Active partners', 'partner-program' ), (string) $active, sprintf( __( '%d total', 'partner-program' ), $total_affiliates ) );
 		self::card( __( 'Pending applications', 'partner-program' ), (string) $pending_apps, '' );
@@ -45,6 +70,11 @@ final class DashboardScreen {
 		self::card( __( 'Approved (unpaid)', 'partner-program' ), Money::format( $approved_cents ), __( 'Ready for next payout batch', 'partner-program' ) );
 		self::card( __( 'Paid', 'partner-program' ), Money::format( $paid_cents ), __( 'Lifetime', 'partner-program' ) );
 		self::card( __( 'Queued payouts', 'partner-program' ), (string) $queued_payouts, '' );
+		self::card(
+			__( 'Pending payout setup', 'partner-program' ),
+			(string) $pending_method_n,
+			__( 'Approved partners with a balance but no method', 'partner-program' )
+		);
 		echo '</div>';
 
 		echo '<p style="margin-top:1.5em;"><a class="button button-primary" href="' . esc_url( admin_url( 'admin.php?page=partner-program-payouts' ) ) . '">' . esc_html__( 'Generate payout batch', 'partner-program' ) . '</a> ';

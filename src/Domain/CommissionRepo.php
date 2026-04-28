@@ -129,6 +129,49 @@ final class CommissionRepo {
 		$wpdb->update( self::table(), $data, $where );
 	}
 
+	/**
+	 * Aggregate pending / approved / paid totals (in cents) for many
+	 * affiliates in a single grouped query. Used by the admin Affiliates
+	 * list to avoid N×3 round-trips per page.
+	 *
+	 * Affiliates with no commissions still appear in the result with all
+	 * three buckets at 0, so callers can always read keys without isset().
+	 *
+	 * @param int[] $ids
+	 * @return array<int, array{pending:int, approved:int, paid:int}>
+	 */
+	public static function sums_for_affiliates( array $ids ): array {
+		$ids = array_values( array_unique( array_map( 'intval', $ids ) ) );
+		$ids = array_filter( $ids, static fn ( int $i ): bool => $i > 0 );
+
+		$result = [];
+		foreach ( $ids as $i ) {
+			$result[ $i ] = [ 'pending' => 0, 'approved' => 0, 'paid' => 0 ];
+		}
+		if ( ! $ids ) {
+			return $result;
+		}
+
+		global $wpdb;
+		$placeholders = implode( ',', array_fill( 0, count( $ids ), '%d' ) );
+		$sql          = 'SELECT affiliate_id, status, SUM(amount_cents) AS total '
+			. 'FROM ' . self::table() . ' '
+			. "WHERE affiliate_id IN ({$placeholders}) "
+			. "AND status IN ('pending','approved','paid') "
+			. 'GROUP BY affiliate_id, status';
+
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+		$rows = $wpdb->get_results( $wpdb->prepare( $sql, ...$ids ), ARRAY_A ) ?: [];
+		foreach ( $rows as $row ) {
+			$aid    = (int) $row['affiliate_id'];
+			$status = (string) $row['status'];
+			if ( isset( $result[ $aid ][ $status ] ) ) {
+				$result[ $aid ][ $status ] = (int) $row['total'];
+			}
+		}
+		return $result;
+	}
+
 	public static function sum_for_affiliate( int $affiliate_id, string $status, ?string $from = null, ?string $to = null ): int {
 		global $wpdb;
 		$sql    = 'SELECT COALESCE(SUM(amount_cents),0) FROM ' . self::table() . ' WHERE affiliate_id = %d AND status = %s';

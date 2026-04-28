@@ -75,7 +75,12 @@ final class AdminMenu {
 				'show_ui'            => true,
 				'show_in_menu'       => false,
 				'show_in_rest'       => true,
-				'capability_type'    => 'post',
+				// Dedicated capability_type so a site editor with the default
+				// `edit_posts` cap can't suddenly publish/edit partner
+				// marketing materials. map_meta_cap routes meta-caps
+				// (edit_post, read_post, delete_post) through these primitives.
+				'capability_type'    => [ 'pp_material', 'pp_materials' ],
+				'map_meta_cap'       => true,
 				'supports'           => [ 'title', 'editor', 'excerpt', 'thumbnail', 'custom-fields' ],
 				'menu_icon'          => 'dashicons-megaphone',
 			]
