@@ -104,9 +104,20 @@ final class TierResolver {
 
 	public static function recalculate_all(): void {
 		global $wpdb;
-		$rows = $wpdb->get_results( 'SELECT id FROM ' . AffiliateRepo::table() . " WHERE status = 'approved'", ARRAY_A ) ?: [];
-		foreach ( $rows as $row ) {
-			self::recalculate_for( (int) $row['id'] );
+
+		$lock_name = 'pp_recalculate_tiers';
+		$got_lock  = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT GET_LOCK(%s, %d)', $lock_name, 1 ) );
+		if ( 1 !== $got_lock ) {
+			return;
+		}
+
+		try {
+			$rows = $wpdb->get_results( 'SELECT id FROM ' . AffiliateRepo::table() . " WHERE status = 'approved'", ARRAY_A ) ?: [];
+			foreach ( $rows as $row ) {
+				self::recalculate_for( (int) $row['id'] );
+			}
+		} finally {
+			$wpdb->query( $wpdb->prepare( 'SELECT RELEASE_LOCK(%s)', $lock_name ) );
 		}
 	}
 

@@ -83,7 +83,11 @@ final class Plugin {
 	}
 
 	public function on_init(): void {
-		Capabilities::register_role();
+		// NOTE: role/cap registration intentionally lives in
+		// Activator::activate() and maybe_run_upgrades(), NOT here.
+		// WP_Role::add_cap() always writes to wp_user_roles even when the
+		// cap is already set, so doing it on every init triggered three
+		// autoloaded option writes per front-end pageview.
 		do_action( 'partner_program_init', $this );
 	}
 
@@ -98,6 +102,10 @@ final class Plugin {
 		// (not just activation) so admins don't lose access after a plain update.
 		Capabilities::register_role();
 		Capabilities::grant_admin_caps();
+		// 1.2.0 introduced a dedicated encryption key (was previously
+		// derived from wp_salt('auth'), which made stored payout details
+		// brittle to admins rotating their salts). Idempotent on re-runs.
+		Encryption::ensure_key();
 		// New cron events introduced in later releases (e.g. 1.2.0's prune
 		// cron) need scheduling on existing installs that never went through
 		// activate(). The helper is idempotent.
