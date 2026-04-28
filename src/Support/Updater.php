@@ -54,6 +54,14 @@ final class Updater {
 			$transient = new \stdClass();
 		}
 
+		// Honour the "Check Again" link on Dashboard → Updates: WP appends
+		// `?force-check=1` and deletes its own update_plugins transient.
+		// Without this our 6h GitHub cache would still be returned and a
+		// brand-new release wouldn't surface until it expires.
+		if ( ! empty( $_GET['force-check'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			delete_site_transient( self::TRANSIENT );
+		}
+
 		$release = $this->fetch_release();
 		if ( ! $release ) {
 			return $transient;
@@ -192,6 +200,9 @@ final class Updater {
 		}
 		$response = wp_remote_get( $url, $args );
 		if ( is_wp_error( $response ) ) {
+			// Network error: 15-min negative cache so a flapping host doesn't
+			// re-hit GitHub on every pageview.
+			set_site_transient( self::TRANSIENT, [], MINUTE_IN_SECONDS * 15 );
 			return null;
 		}
 		$code = (int) wp_remote_retrieve_response_code( $response );
@@ -201,6 +212,9 @@ final class Updater {
 		}
 		$json = json_decode( (string) wp_remote_retrieve_body( $response ), true );
 		if ( ! is_array( $json ) ) {
+			// 200 with malformed body — same negative cache as a non-200
+			// response so we don't refetch on every pageview.
+			set_site_transient( self::TRANSIENT, [], MINUTE_IN_SECONDS * 15 );
 			return null;
 		}
 		set_site_transient( self::TRANSIENT, $json, self::TRANSIENT_TTL );

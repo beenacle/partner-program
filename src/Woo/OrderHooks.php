@@ -35,11 +35,13 @@ final class OrderHooks {
 		add_action( 'woocommerce_order_status_failed', [ $this, 'reject_on_status' ], 10, 1 );
 
 		// WooCommerce Subscriptions: stamp attribution onto renewal orders
-		// from the parent subscription / parent order. Only registered
-		// when WCS is active so we don't add noise to the hook chain.
-		if ( class_exists( 'WC_Subscription' ) ) {
-			add_action( 'wcs_renewal_order_created', [ $this, 'inherit_subscription_attribution' ], 20, 2 );
-		}
+		// from the parent subscription / parent order. Registered
+		// unconditionally — gating on `class_exists( 'WC_Subscription' )`
+		// here was load-order-dependent and silently dropped the listener
+		// because WCS doesn't load until plugins_loaded priority 10 and we
+		// boot at priority 5. The hook is never fired without WCS, so an
+		// always-on add_action() is free.
+		add_action( 'wcs_renewal_order_created', [ $this, 'inherit_subscription_attribution' ], 20, 2 );
 
 		add_filter( 'partner_program_resolve_attribution', [ $this, 'resolve_attribution' ], 10, 2 );
 	}
@@ -231,7 +233,11 @@ final class OrderHooks {
 			if ( in_array( $row['status'], [ 'paid', 'rejected' ], true ) ) {
 				continue;
 			}
-			$marker = sprintf( 'refund_id=%d', $refund_id );
+			// Wrap the refund-id in delimiters so `refund_id=10` doesn't
+			// false-match against an earlier `refund_id=100` already in
+			// notes (substring containment) and silently skip the second
+			// adjustment.
+			$marker = sprintf( '[refund_id=%d]', $refund_id );
 			$prior  = (string) ( $row['notes'] ?? '' );
 			if ( '' !== $prior && false !== strpos( $prior, $marker ) ) {
 				continue; // Same refund already applied; idempotent on retries.
@@ -241,7 +247,7 @@ final class OrderHooks {
 			// second partial refund decays geometrically off the result of
 			// the first one.
 			$new_amount = (int) round( (int) $row['original_amount_cents'] * $ratio );
-			$entry      = sprintf( 'Adjusted for partial refund (%s, ratio=%.4f)', $marker, $ratio );
+			$entry      = sprintf( 'Adjusted for partial refund %s (ratio=%.4f)', $marker, $ratio );
 			$notes      = '' === $prior ? $entry : trim( $prior ) . "\n" . $entry;
 			CommissionRepo::update(
 				(int) $row['id'],
