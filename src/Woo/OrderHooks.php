@@ -12,6 +12,7 @@ namespace PartnerProgram\Woo;
 
 use PartnerProgram\Domain\AffiliateRepo;
 use PartnerProgram\Domain\CommissionRepo;
+use PartnerProgram\Support\SettingsRepo;
 use PartnerProgram\Tracking\Tracker;
 
 defined( 'ABSPATH' ) || exit;
@@ -20,6 +21,12 @@ final class OrderHooks {
 
 	public function register(): void {
 		add_action( 'woocommerce_checkout_create_order', [ $this, 'attach_attribution_meta' ], 10, 2 );
+		// Late catch-all: any order that wasn't created via the standard
+		// checkout flow (admin-created orders, REST/CLI, payment-gateway
+		// callbacks that skip checkout_create_order) gets a second pass
+		// once the order is saved. Idempotent — bails if meta is already
+		// set by the early hook.
+		add_action( 'woocommerce_new_order', [ $this, 'attach_attribution_late' ], 20, 2 );
 		add_action( 'woocommerce_order_status_processing', [ $this, 'record_commission' ], 20, 1 );
 		add_action( 'woocommerce_order_status_completed', [ $this, 'record_commission' ], 20, 1 );
 		add_action( 'woocommerce_order_status_refunded', [ $this, 'reject_on_refund' ], 10, 1 );
@@ -27,10 +34,52 @@ final class OrderHooks {
 		add_action( 'woocommerce_order_status_cancelled', [ $this, 'reject_on_status' ], 10, 1 );
 		add_action( 'woocommerce_order_status_failed', [ $this, 'reject_on_status' ], 10, 1 );
 
+		// WooCommerce Subscriptions: stamp attribution onto renewal orders
+		// from the parent subscription / parent order. Only registered
+		// when WCS is active so we don't add noise to the hook chain.
+		if ( class_exists( 'WC_Subscription' ) ) {
+			add_action( 'wcs_renewal_order_created', [ $this, 'inherit_subscription_attribution' ], 20, 2 );
+		}
+
 		add_filter( 'partner_program_resolve_attribution', [ $this, 'resolve_attribution' ], 10, 2 );
 	}
 
 	public function attach_attribution_meta( \WC_Order $order, array $data ): void {
+		unset( $data );
+		$this->apply_attribution( $order );
+	}
+
+	/**
+	 * Late attribution pass for orders that didn't pass through
+	 * `woocommerce_checkout_create_order` (admin-created, REST, CLI, some
+	 * gateway callback paths). Idempotent.
+	 *
+	 * @param int            $order_id
+	 * @param \WC_Order|null $order
+	 */
+	public function attach_attribution_late( int $order_id, $order = null ): void {
+		if ( ! $order || ! $order instanceof \WC_Order ) {
+			$order = wc_get_order( $order_id );
+		}
+		if ( ! $order instanceof \WC_Order ) {
+			return;
+		}
+		if ( $order->get_meta( '_pp_affiliate_id' ) ) {
+			return;
+		}
+		if ( $this->apply_attribution( $order ) ) {
+			$order->save();
+		}
+	}
+
+	/**
+	 * Resolve cookie + coupon attribution and stamp the meta keys on the
+	 * given order. Returns true if any meta was set so callers know
+	 * whether to persist.
+	 */
+	private function apply_attribution( \WC_Order $order ): bool {
+		$changed = false;
+
 		$code = Tracker::current_referral_code();
 		if ( $code ) {
 			$affiliate = AffiliateRepo::find_by_code( $code );
@@ -38,6 +87,7 @@ final class OrderHooks {
 				$order->update_meta_data( '_pp_affiliate_id', (string) $affiliate['id'] );
 				$order->update_meta_data( '_pp_referral_code', $code );
 				$order->update_meta_data( '_pp_attribution_source', 'referral' );
+				$changed = true;
 			}
 		}
 
@@ -61,7 +111,58 @@ final class OrderHooks {
 			} elseif ( $existing_aff === $aff_id ) {
 				$order->update_meta_data( '_pp_attribution_source', 'both' );
 			}
+			$changed = true;
 			break;
+		}
+
+		return $changed;
+	}
+
+	/**
+	 * Copy attribution meta from a subscription (or its parent order)
+	 * onto each freshly-created renewal order. Required because WCS
+	 * doesn't propagate custom meta automatically.
+	 *
+	 * @param mixed $renewal_order
+	 * @param mixed $subscription
+	 */
+	public function inherit_subscription_attribution( $renewal_order, $subscription ): void {
+		if ( ! $renewal_order instanceof \WC_Order || ! is_object( $subscription ) ) {
+			return;
+		}
+		if ( ! (bool) ( new SettingsRepo() )->get( 'attribution.subscription_renewals', true ) ) {
+			return;
+		}
+		if ( $renewal_order->get_meta( '_pp_affiliate_id' ) ) {
+			return;
+		}
+
+		$parent = null;
+		if ( method_exists( $subscription, 'get_parent_id' ) ) {
+			$parent_id = (int) $subscription->get_parent_id();
+			if ( $parent_id > 0 ) {
+				$candidate = wc_get_order( $parent_id );
+				if ( $candidate instanceof \WC_Order ) {
+					$parent = $candidate;
+				}
+			}
+		}
+
+		$keys    = [ '_pp_affiliate_id', '_pp_referral_code', '_pp_attribution_source', '_pp_coupon_used', '_pp_coupon_code' ];
+		$changed = false;
+		foreach ( $keys as $key ) {
+			$value = method_exists( $subscription, 'get_meta' ) ? $subscription->get_meta( $key ) : '';
+			if ( '' === (string) $value && $parent ) {
+				$value = $parent->get_meta( $key );
+			}
+			if ( '' === (string) $value ) {
+				continue;
+			}
+			$renewal_order->update_meta_data( $key, $value );
+			$changed = true;
+		}
+		if ( $changed ) {
+			$renewal_order->save();
 		}
 	}
 

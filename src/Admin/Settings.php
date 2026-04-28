@@ -184,7 +184,7 @@ final class Settings {
 			);
 		}
 		echo '</tbody></table>';
-		echo '<p class="description">' . esc_html__( 'Key is the stable identifier for an affiliate\'s assigned tier; leave blank to auto-generate from the label. Leave the last row empty if you do not need it. Leave Max blank for the open-ended top tier. Tiers are sorted by Min on save.', 'partner-program' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Key is the stable identifier for an affiliate\'s assigned tier; leave blank to auto-generate from the label. Leave the last row empty if you do not need it. Tiers are sorted by Min on save and matching is "highest tier whose Min ≤ sales", so Max is informational only — set it as a guideline for admins, not as a runtime gate.', 'partner-program' ) . '</p>';
 	}
 
 	private static function tab_coupon_bonus( SettingsRepo $s ): void {
@@ -218,6 +218,12 @@ final class Settings {
 		self::field_text( 'cookie_lifetime', __( 'Cookie lifetime (days)', 'partner-program' ), (string) $s->get( 'tracking.cookie_lifetime' ), '', 'number' );
 		self::field_text( 'param', __( 'URL parameter', 'partner-program' ), (string) $s->get( 'tracking.param' ) );
 		self::field_text( 'rewrite_slug', __( 'Pretty rewrite slug (optional)', 'partner-program' ), (string) $s->get( 'tracking.rewrite_slug' ) );
+		self::field_checkbox(
+			'attribution_subscription_renewals',
+			__( 'Inherit attribution onto subscription renewals', 'partner-program' ),
+			(bool) $s->get( 'attribution.subscription_renewals', true ),
+			__( 'Only applies when WooCommerce Subscriptions is active.', 'partner-program' )
+		);
 		echo '</table>';
 	}
 
@@ -446,6 +452,9 @@ final class Settings {
 					'cookie_lifetime' => max( 1, (int) ( $_POST['cookie_lifetime'] ?? 30 ) ),
 					'param'           => sanitize_key( (string) ( $_POST['param'] ?? 'ref' ) ),
 					'rewrite_slug'    => sanitize_title( (string) ( $_POST['rewrite_slug'] ?? '' ) ),
+				] );
+				$repo->save_section( 'attribution', [
+					'subscription_renewals' => ! empty( $_POST['attribution_subscription_renewals'] ),
 				] );
 				break;
 

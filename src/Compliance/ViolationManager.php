@@ -25,6 +25,10 @@ final class ViolationManager {
 
 		if ( (bool) $settings->get( 'compliance.auto_suspend_on_violation', true ) ) {
 			AffiliateRepo::update( $affiliate_id, [ 'status' => 'suspended' ] );
+			// Mirror the AffiliatesScreen suspend action so listeners
+			// (CouponManager deactivation, partner notification email)
+			// fire on compliance-driven suspensions too.
+			do_action( 'partner_program_affiliate_suspended', $affiliate_id );
 		}
 
 		// Forfeit unpaid commissions.

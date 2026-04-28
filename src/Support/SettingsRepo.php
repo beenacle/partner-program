@@ -61,6 +61,12 @@ final class SettingsRepo {
 				'param'            => 'ref',
 				'rewrite_slug'     => '',
 			],
+			'attribution'  => [
+				// Inherit attribution from the parent subscription onto each
+				// renewal order. Only takes effect when WooCommerce
+				// Subscriptions is active; harmless otherwise.
+				'subscription_renewals' => true,
+			],
 			'hold_payouts' => [
 				'hold_days'        => 15,
 				'schedule'         => 'monthly',

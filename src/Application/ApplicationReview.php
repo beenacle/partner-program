@@ -39,8 +39,9 @@ final class ApplicationReview {
 			exit;
 		}
 
+		$result = true;
 		if ( 'approve' === $action ) {
-			$this->approve( $application, $notes );
+			$result = $this->approve( $application, $notes );
 		} elseif ( 'reject' === $action ) {
 			ApplicationRepo::update(
 				$application_id,
@@ -53,13 +54,27 @@ final class ApplicationReview {
 			);
 		}
 
-		wp_safe_redirect( admin_url( 'admin.php?page=partner-program-applications&id=' . $application_id . '&reviewed=1' ) );
+		$args = [ 'page' => 'partner-program-applications', 'id' => $application_id ];
+		if ( is_wp_error( $result ) ) {
+			$args['reviewed'] = 'error';
+			$args['reason']   = $result->get_error_code() ?: 'unknown';
+		} else {
+			$args['reviewed'] = 1;
+		}
+		wp_safe_redirect( add_query_arg( $args, admin_url( 'admin.php' ) ) );
 		exit;
 	}
 
-	private function approve( array $application, string $notes ): void {
+	/**
+	 * @return true|\WP_Error
+	 */
+	private function approve( array $application, string $notes ) {
 		$data  = json_decode( (string) $application['submitted_data'], true ) ?: [];
 		$email = (string) $application['email'];
+
+		if ( '' === $email || ! is_email( $email ) ) {
+			return new \WP_Error( 'email_invalid', __( 'Application email is missing or invalid.', 'partner-program' ) );
+		}
 
 		$user_id = email_exists( $email );
 		if ( ! $user_id ) {
@@ -68,6 +83,9 @@ final class ApplicationReview {
 			$i          = 1;
 			while ( username_exists( $login ) ) {
 				$login = $base_login . $i++;
+				if ( $i > 50 ) {
+					return new \WP_Error( 'login_collision', __( 'Could not generate a unique username for this applicant.', 'partner-program' ) );
+				}
 			}
 			$password = wp_generate_password( 16 );
 			$user_id  = wp_insert_user(
@@ -80,7 +98,7 @@ final class ApplicationReview {
 				]
 			);
 			if ( is_wp_error( $user_id ) ) {
-				return;
+				return new \WP_Error( 'user_create_failed', $user_id->get_error_message() );
 			}
 			wp_new_user_notification( (int) $user_id, null, 'both' );
 		} else {
@@ -111,6 +129,9 @@ final class ApplicationReview {
 					'agreement_version_accepted' => $current_agr ? (int) $current_agr['id'] : null,
 				]
 			);
+			if ( ! $affiliate_id ) {
+				return new \WP_Error( 'affiliate_create_failed', __( 'Failed to create the affiliate record.', 'partner-program' ) );
+			}
 		}
 
 		ApplicationRepo::update(
@@ -126,6 +147,7 @@ final class ApplicationReview {
 
 		do_action( 'partner_program_affiliate_approved', $affiliate_id );
 		$this->send_welcome_email( (int) $user_id, $affiliate_id );
+		return true;
 	}
 
 	private function send_welcome_email( int $user_id, int $affiliate_id ): void {

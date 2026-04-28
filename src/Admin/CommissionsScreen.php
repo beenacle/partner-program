@@ -72,7 +72,7 @@ final class CommissionsScreen {
 			echo '<td>' . esc_html( $user ? $user->user_email : '#' . $row['affiliate_id'] ) . '</td>';
 			$order_id = isset( $row['order_id'] ) && '' !== $row['order_id'] && null !== $row['order_id'] ? (int) $row['order_id'] : 0;
 			if ( $order_id > 0 ) {
-				echo '<td><a href="' . esc_url( get_edit_post_link( $order_id ) ?: '#' ) . '">#' . $order_id . '</a></td>';
+				echo '<td><a href="' . esc_url( self::order_edit_url( $order_id ) ) . '">#' . $order_id . '</a></td>';
 			} else {
 				echo '<td>—</td>';
 			}
@@ -115,11 +115,45 @@ final class CommissionsScreen {
 		if ( ! isset( $map[ $action ] ) ) {
 			return;
 		}
+		// `partner_program_commission_<status>` lets integrations
+		// (notification emails, accounting exports) react to admin-driven
+		// changes the same way they react to cron-driven ones.
+		$action_map = [
+			'approved' => 'partner_program_commission_approved',
+			'rejected' => 'partner_program_commission_rejected',
+			'clawback' => 'partner_program_commission_clawback',
+		];
+		$new_status = $map[ $action ];
 		foreach ( $ids as $id ) {
-			CommissionRepo::update( $id, [ 'status' => $map[ $action ] ] );
+			$id     = (int) $id;
+			$before = CommissionRepo::find( $id );
+			if ( ! $before || $before['status'] === $new_status ) {
+				continue; // No-op: skip the row + its action.
+			}
+			CommissionRepo::update( $id, [ 'status' => $new_status ] );
+			if ( isset( $action_map[ $new_status ] ) ) {
+				do_action( $action_map[ $new_status ], $id );
+			}
 		}
 		wp_safe_redirect( add_query_arg( 'done', 1, admin_url( 'admin.php?page=partner-program-commissions' ) ) );
 		exit;
+	}
+
+	/**
+	 * HPOS-aware "Edit order" URL. With HPOS enabled, orders aren't
+	 * `wp_posts` rows so `get_edit_post_link()` returns null and produces
+	 * a broken `#` link. `WC_Order::get_edit_order_url()` knows about both
+	 * storage modes; we fall back to `get_edit_post_link()` only when
+	 * Woo isn't loaded for some reason (defensive).
+	 */
+	private static function order_edit_url( int $order_id ): string {
+		if ( function_exists( 'wc_get_order' ) ) {
+			$order = wc_get_order( $order_id );
+			if ( $order ) {
+				return $order->get_edit_order_url();
+			}
+		}
+		return (string) ( get_edit_post_link( $order_id ) ?: '#' );
 	}
 
 	private static function handle_manual_adjustment(): void {
@@ -133,7 +167,7 @@ final class CommissionsScreen {
 		if ( ! $affiliate_id || 0.0 === $amount ) {
 			return;
 		}
-		CommissionRepo::create(
+		$commission_id = CommissionRepo::create(
 			[
 				'affiliate_id'      => $affiliate_id,
 				// NULL keeps each adjustment independent under the unique
@@ -148,6 +182,13 @@ final class CommissionsScreen {
 				'notes'             => $notes ?: 'Manual adjustment',
 			]
 		);
+		// Adjustments skip the engine (no order_id) so we fire the
+		// "recorded" + "approved" actions ourselves; integrations that
+		// listen for either one see manual entries too.
+		if ( $commission_id > 0 ) {
+			do_action( 'partner_program_commission_recorded', $commission_id, $affiliate_id, 0 );
+			do_action( 'partner_program_commission_approved', $commission_id );
+		}
 		wp_safe_redirect( add_query_arg( 'done', 1, admin_url( 'admin.php?page=partner-program-commissions' ) ) );
 		exit;
 	}

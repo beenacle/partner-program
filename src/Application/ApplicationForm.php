@@ -29,9 +29,9 @@ final class ApplicationForm {
 	}
 
 	public function enqueue_assets(): void {
-		if ( ! is_singular() ) {
-			return;
-		}
+		// Always register so that render_shortcode() can enqueue the handle
+		// regardless of whether the shortcode lives on a singular template,
+		// an archive widget, a block-template part, or a REST-rendered page.
 		wp_register_style( 'partner-program-frontend', PARTNER_PROGRAM_URL . 'assets/css/frontend.css', [], PARTNER_PROGRAM_VERSION );
 	}
 
@@ -211,14 +211,37 @@ final class ApplicationForm {
 	}
 
 	private function redirect_back( string $message, string $type = 'success' ): void {
-		set_transient( 'pp_apply_flash_' . wp_get_session_token(), [ 'message' => $message, 'type' => $type ], 60 );
+		set_transient( 'pp_apply_flash_' . $this->flash_key(), [ 'message' => $message, 'type' => $type ], 60 );
 		$ref = wp_get_referer();
 		wp_safe_redirect( $ref ? add_query_arg( [ 'pp_apply' => $type ], $ref ) : home_url( '/' ) );
 		exit;
 	}
 
+	/**
+	 * Build a stable per-visitor key for the application flash transient.
+	 *
+	 * Anonymous visitors don't have a WordPress session token, so falling
+	 * back to wp_get_session_token() returns "" and every anonymous applicant
+	 * shares the same transient — the next visitor's form would render with
+	 * the previous applicant's flash message. We mix in a hash of the IP and
+	 * user-agent for those visitors. Logged-in users keep the session-token
+	 * key (rotates on logout, immune to UA changes).
+	 */
+	private function flash_key(): string {
+		$session = wp_get_session_token();
+		if ( '' !== $session ) {
+			return 'sess:' . $session;
+		}
+		$ip = Tracker::ip_hash();
+		$ua = isset( $_SERVER['HTTP_USER_AGENT'] ) ? (string) $_SERVER['HTTP_USER_AGENT'] : '';
+		if ( '' !== $ip || '' !== $ua ) {
+			return 'anon:' . substr( hash( 'sha256', $ip . '|' . $ua ), 0, 24 );
+		}
+		return 'anon:fallback';
+	}
+
 	private function consume_flash(): ?array {
-		$key = 'pp_apply_flash_' . wp_get_session_token();
+		$key = 'pp_apply_flash_' . $this->flash_key();
 		$val = get_transient( $key );
 		if ( $val ) {
 			delete_transient( $key );

@@ -77,7 +77,19 @@ final class ApplicationsScreen {
 
 		echo '<div class="wrap"><h1>' . esc_html__( 'Application', 'partner-program' ) . ' #' . (int) $app['id'] . '</h1>';
 		if ( isset( $_GET['reviewed'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Saved.', 'partner-program' ) . '</p></div>';
+			$status = sanitize_key( (string) wp_unslash( $_GET['reviewed'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			if ( 'error' === $status ) {
+				$reason = isset( $_GET['reason'] ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+					? sanitize_key( (string) wp_unslash( $_GET['reason'] ) ) // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+					: '';
+				$detail = self::review_error_message( $reason );
+				echo '<div class="notice notice-error"><p>'
+					. esc_html__( 'Approval failed.', 'partner-program' )
+					. ( '' !== $detail ? ' ' . esc_html( $detail ) : '' )
+					. '</p></div>';
+			} else {
+				echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Saved.', 'partner-program' ) . '</p></div>';
+			}
 		}
 
 		echo '<table class="form-table"><tbody>';
@@ -144,6 +156,26 @@ final class ApplicationsScreen {
 			return $label;
 		}
 		return ucwords( str_replace( [ '_', '-' ], ' ', $key ) );
+	}
+
+	/**
+	 * Translate a WP_Error code surfaced by ApplicationReview::approve() into
+	 * an admin-facing sentence. Unknown codes return "" so the caller falls
+	 * back to the generic "Approval failed." headline.
+	 */
+	private static function review_error_message( string $reason ): string {
+		switch ( $reason ) {
+			case 'email_invalid':
+				return __( 'The applicant email is missing or invalid.', 'partner-program' );
+			case 'login_collision':
+				return __( 'Could not generate a unique username for this applicant.', 'partner-program' );
+			case 'user_create_failed':
+				return __( 'Could not create a WordPress user for the applicant.', 'partner-program' );
+			case 'affiliate_create_failed':
+				return __( 'Could not create the affiliate record.', 'partner-program' );
+			default:
+				return '';
+		}
 	}
 
 	/**

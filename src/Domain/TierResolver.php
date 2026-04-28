@@ -83,13 +83,19 @@ final class TierResolver {
 		return null;
 	}
 
+	/**
+	 * Highest tier whose `min` ≤ sales-in-dollars. Tiers are sorted ASC by
+	 * min in `tiers()`, so the last match is the tightest fit. The `max`
+	 * field is now informational only — using inclusive `[min, max]` would
+	 * leak fractional sales between consecutive tiers (e.g. $4999.50 with
+	 * 0–4999 / 5000–14999 / 15000+ matches neither tier1 nor tier2).
+	 */
 	public static function tier_key_for_sales_cents( int $sales_cents ): ?string {
 		$dollars = $sales_cents / 100;
 		$picked  = null;
 		foreach ( self::tiers() as $t ) {
 			$min = (float) ( $t['min'] ?? 0 );
-			$max = isset( $t['max'] ) && null !== $t['max'] && '' !== $t['max'] ? (float) $t['max'] : null;
-			if ( $dollars >= $min && ( null === $max || $dollars <= $max ) ) {
+			if ( $dollars >= $min ) {
 				$picked = (string) ( $t['key'] ?? '' );
 			}
 		}
