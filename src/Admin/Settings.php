@@ -9,6 +9,7 @@ declare( strict_types = 1 );
 
 namespace PartnerProgram\Admin;
 
+use PartnerProgram\Domain\TierResolver;
 use PartnerProgram\Support\Capabilities;
 use PartnerProgram\Support\SettingsRepo;
 
@@ -402,56 +403,9 @@ final class Settings {
 				break;
 
 			case 'tiers':
-				$rows  = isset( $_POST['tiers'] ) && is_array( $_POST['tiers'] ) ? wp_unslash( (array) $_POST['tiers'] ) : [];
-				$clean = [];
-				$used  = [];
-				foreach ( $rows as $row ) {
-					if ( ! is_array( $row ) ) { continue; }
-					$rate = isset( $row['rate'] ) && '' !== $row['rate'] ? (float) $row['rate'] : null;
-					if ( null === $rate ) { continue; }
-
-					$label = sanitize_text_field( (string) ( $row['label'] ?? '' ) );
-					$key   = isset( $row['key'] ) ? sanitize_title( (string) $row['key'] ) : '';
-					if ( '' === $key ) {
-						$base = sanitize_title( $label );
-						if ( '' === $base ) {
-							$base = 'tier-' . ( count( $clean ) + 1 );
-						}
-						$key = $base;
-						$n   = 2;
-						while ( in_array( $key, $used, true ) ) {
-							$key = $base . '-' . $n;
-							++$n;
-						}
-					} elseif ( in_array( $key, $used, true ) ) {
-						$base = $key;
-						$n    = 2;
-						while ( in_array( $key, $used, true ) ) {
-							$key = $base . '-' . $n;
-							++$n;
-						}
-					}
-					$used[] = $key;
-
-					$clean[] = [
-						'key'   => $key,
-						'label' => $label,
-						'min'   => isset( $row['min'] ) && '' !== $row['min'] ? (float) $row['min'] : 0.0,
-						'max'   => isset( $row['max'] ) && '' !== $row['max'] ? (float) $row['max'] : null,
-						'rate'  => $rate,
-					];
-				}
-
-				// Sort by min ASC so positional next-tier lookups are stable.
-				usort(
-					$clean,
-					static function ( $a, $b ) {
-						return (float) ( $a['min'] ?? 0 ) <=> (float) ( $b['min'] ?? 0 );
-					}
-				);
-
+				$rows         = isset( $_POST['tiers'] ) && is_array( $_POST['tiers'] ) ? wp_unslash( (array) $_POST['tiers'] ) : [];
 				$all          = $repo->all();
-				$all['tiers'] = $clean;
+				$all['tiers'] = TierResolver::normalize( $rows );
 				$repo->replace_all( $all );
 				break;
 
@@ -614,6 +568,13 @@ final class Settings {
 		if ( ! $filtered ) {
 			wp_safe_redirect( admin_url( 'admin.php?page=partner-program-settings&tab=iotools&import_error=1' ) );
 			exit;
+		}
+
+		// Re-normalize tiers so an import can't sneak in unsorted or
+		// duplicate-keyed tiers that the read path no longer defends
+		// against.
+		if ( isset( $filtered['tiers'] ) && is_array( $filtered['tiers'] ) ) {
+			$filtered['tiers'] = TierResolver::normalize( $filtered['tiers'] );
 		}
 
 		( new SettingsRepo() )->replace_all( $filtered );
