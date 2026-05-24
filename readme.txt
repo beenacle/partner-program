@@ -4,7 +4,7 @@ Tags: affiliate, partner, woocommerce, referral, commission
 Requires at least: 6.2
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.2.0
+Stable tag: 1.4.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -52,6 +52,19 @@ If both refer to the same affiliate, the source is recorded as `both` and the co
 Generate a payout batch from *Partner Program → Payouts*. Download the CSV, send funds via your preferred method (ACH, PayPal, Zelle, CashApp, Wise, check), then click "Mark paid" so commissions roll to status `paid`.
 
 == Changelog ==
+
+= 1.4.1 =
+* Admin: manual add-affiliate flow with WordPress user autocomplete.
+* Admin: paginated affiliates, commissions, payouts, and compliance lists.
+* Admin: bulk hold release for selected pending commissions.
+* Admin: payout revert now marks the batch as `reverted` (was `failed`, which didn't match the UI labels or filter logic).
+* Compliance: prohibited-term scanner uses word boundaries so partial matches (e.g. "use" inside "cause") no longer false-positive.
+* Portal: clearer tier-progress and coupon-code display on the overview and links tabs.
+
+= 1.4.0 =
+* Email: transactional HTML email layer (Mailer + EventRegistry) for application, approval, commission, and payout events.
+* Admin: expanded affiliate detail screen and email notification settings.
+* UI: shared admin/portal CSS components and native WordPress admin patterns.
 
 = 1.2.0 =
 * Correctness: partial refunds now adjust commissions linearly off the original commission amount; previously a second partial refund decayed geometrically.
