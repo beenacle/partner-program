@@ -267,6 +267,7 @@ final class PayoutManager {
 	}
 
 	public static function revert( int $payout_id ): void {
+		global $wpdb;
 		$payout = PayoutRepo::find( $payout_id );
 		if ( ! $payout || 'queued' !== $payout['status'] ) {
 			return;
@@ -275,19 +276,35 @@ final class PayoutManager {
 		foreach ( $items as $item ) {
 			CommissionRepo::update( (int) $item['commission_id'], [ 'payout_id' => null ] );
 		}
+		// Delete the item rows too. pp_payout_items has UNIQUE(commission_id),
+		// so leaving them behind makes the next batch's add_item() INSERT
+		// collide and silently drop — and mark_paid() then never flips that
+		// commission to 'paid', so it gets paid again in a later batch.
+		$wpdb->delete( PayoutRepo::items_table(), [ 'payout_id' => $payout_id ] );
 		PayoutRepo::update( $payout_id, [ 'status' => 'reverted', 'notes' => 'Reverted by admin' ] );
 		do_action( 'partner_program_payout_reverted', $payout_id );
 	}
 
 	public static function stream_csv_for_batch( string $batch_id ): void {
 		global $wpdb;
+		// Only queued/paid payouts are payable. A reverted payout's commissions
+		// have been returned to the eligible pool (and may be in a newer batch),
+		// so it must never reach a finance CSV — else it gets paid twice.
 		$payouts = $wpdb->get_results( $wpdb->prepare(
-			'SELECT * FROM ' . PayoutRepo::table() . ' WHERE csv_batch_id = %s ORDER BY method, affiliate_id', $batch_id
+			'SELECT * FROM ' . PayoutRepo::table() . " WHERE csv_batch_id = %s AND status IN ( 'queued', 'paid' ) ORDER BY method, affiliate_id", $batch_id
 		), ARRAY_A ) ?: [];
 
 		nocache_headers();
 		header( 'Content-Type: text/csv; charset=utf-8' );
 		header( 'Content-Disposition: attachment; filename="' . sanitize_file_name( $batch_id ) . '.csv"' );
+
+		// Neutralize spreadsheet formula injection: partners control their
+		// display name and payout-detail fields, and a cell beginning with
+		// = + - @ (or tab/CR) executes when finance opens the CSV in Excel/Sheets.
+		$csv_safe = static function ( $v ): string {
+			$v = (string) $v;
+			return ( '' !== $v && false !== strpbrk( $v[0], "=+-@\t\r" ) ) ? "'" . $v : $v;
+		};
 
 		$out = fopen( 'php://output', 'w' );
 		fputcsv( $out, [ 'payout_id', 'affiliate_id', 'partner_email', 'partner_name', 'method', 'amount', 'currency', 'period_start', 'period_end', 'payout_account', 'payout_extra' ] );
@@ -299,15 +316,15 @@ final class PayoutManager {
 			fputcsv( $out, [
 				(int) $p['id'],
 				(int) $p['affiliate_id'],
-				$user ? $user->user_email : '',
-				$user ? $user->display_name : '',
+				$csv_safe( $user ? $user->user_email : '' ),
+				$csv_safe( $user ? $user->display_name : '' ),
 				(string) $p['method'],
 				Money::to_fixed( (int) $p['total_amount_cents'] ),
 				(string) $p['currency'],
 				(string) ( $p['period_start'] ?? '' ),
 				(string) ( $p['period_end'] ?? '' ),
-				(string) ( $details['account'] ?? $details['email'] ?? $details['handle'] ?? '' ),
-				wp_json_encode( $details ) ?: '',
+				$csv_safe( $details['account'] ?? $details['routing'] ?? $details['email'] ?? $details['handle'] ?? '' ),
+				$csv_safe( wp_json_encode( $details ) ?: '' ),
 			] );
 		}
 		fclose( $out );

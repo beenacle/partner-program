@@ -66,6 +66,22 @@ final class CommissionEngine {
 			return;
 		}
 
+		// Self-referral guard: an affiliate must not earn commission on their
+		// own purchase (via their own ?ref= link or coupon), unless explicitly
+		// allowed. Match on the order's customer id or billing email.
+		if ( ! (bool) $settings->get( 'commissions.allow_self_referral', false ) ) {
+			$aff_user_id = (int) ( $affiliate['user_id'] ?? 0 );
+			if ( $aff_user_id > 0 ) {
+				$buyer_id    = (int) $order->get_customer_id();
+				$aff_user    = get_userdata( $aff_user_id );
+				$aff_email   = $aff_user ? strtolower( (string) $aff_user->user_email ) : '';
+				$buyer_email = strtolower( (string) $order->get_billing_email() );
+				if ( ( $buyer_id > 0 && $buyer_id === $aff_user_id ) || ( '' !== $aff_email && $aff_email === $buyer_email ) ) {
+					return;
+				}
+			}
+		}
+
 		$rate = $this->resolve_rate( $affiliate, $settings );
 
 		$source        = $attribution['source'] ?? 'referral';
@@ -78,12 +94,19 @@ final class CommissionEngine {
 
 		$effective_rate = $rate + $coupon_bonus;
 		$effective_rate = (float) apply_filters( 'partner_program_calculate_commission_rate', $effective_rate, $affiliate, $order, $attribution );
+		// Never pay more than 100% of the commissionable base, no matter how
+		// an override + coupon bonus (or a filter) combine.
+		$effective_rate = max( 0.0, min( 100.0, $effective_rate ) );
 
 		$amount_cents = (int) round( $base_cents * ( $effective_rate / 100 ) );
 		$amount_cents = (int) apply_filters( 'partner_program_calculate_commission_amount', $amount_cents, $base_cents, $effective_rate, $order, $affiliate );
 
 		$hold_days = (int) $settings->get( 'hold_payouts.hold_days', 15 );
-		$paid_at   = $order->get_date_paid() ? $order->get_date_paid()->getTimestamp() : time();
+		// Use the order's economic paid date; fall back to its creation date
+		// (always set) rather than import-time now(), so back-dated/imported
+		// paid orders release on schedule instead of restarting the hold clock.
+		$paid_date = $order->get_date_paid() ?: $order->get_date_created();
+		$paid_at   = $paid_date ? $paid_date->getTimestamp() : time();
 		$release   = gmdate( 'Y-m-d H:i:s', $paid_at + ( $hold_days * DAY_IN_SECONDS ) );
 
 		$result = CommissionRepo::create_for_order(

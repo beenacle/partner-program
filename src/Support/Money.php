@@ -24,7 +24,15 @@ final class Money {
 	public static function format( int $cents, string $currency = '' ): string {
 		$amount = self::to_decimal( $cents );
 		if ( function_exists( 'wc_price' ) ) {
-			return wp_strip_all_tags( wc_price( $amount, $currency ? [ 'currency' => $currency ] : [] ) );
+			// wc_price() renders the currency symbol as an HTML entity
+			// (e.g. "&#36;"). Decode it so the value is clean plain text — in
+			// email subjects and other non-HTML contexts the raw entity would
+			// otherwise show literally as "&#36;15.15".
+			return html_entity_decode(
+				wp_strip_all_tags( wc_price( $amount, $currency ? [ 'currency' => $currency ] : [] ) ),
+				ENT_QUOTES,
+				'UTF-8'
+			);
 		}
 		return ( $currency ? $currency . ' ' : '' ) . number_format_i18n( $amount, 2 );
 	}

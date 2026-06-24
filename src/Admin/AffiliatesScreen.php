@@ -399,7 +399,11 @@ final class AffiliatesScreen {
 				$rate = (float) $rate_raw;
 				if ( $rate < 0 || $rate > 100 ) {
 					$errors[] = __( 'Commission rate must be between 0 and 100.', 'partner-program' );
-				} elseif ( (float) $old_rate !== $rate ) {
+				} elseif ( '' === $old_rate || (float) $old_rate !== $rate ) {
+					// `'' === $old_rate` forces a write when no override exists yet,
+					// so an explicit 0% override saves (without it, (float)'' === 0.0
+					// makes the comparison drop the change and the partner keeps the
+					// tier/base rate).
 					$update['default_commission_rate']  = number_format( $rate, 4, '.', '' );
 					$changes['default_commission_rate'] = [ '' !== $old_rate ? $old_rate : '(tier default)', (string) $rate ];
 				}
@@ -474,6 +478,19 @@ final class AffiliatesScreen {
 				'affiliate',
 				[ 'changes' => $changes ]
 			);
+
+			// Fire status-transition events so coupon (de)activation and emails
+			// happen here too — the quick-action buttons do, and an edit-form
+			// status change must be symmetric, or e.g. suspending leaves the
+			// PARTNER-<code> coupon live while the affiliate earns nothing.
+			if ( isset( $changes['status'] ) ) {
+				$new_status = $changes['status'][1];
+				if ( 'approved' === $new_status ) {
+					do_action( 'partner_program_affiliate_approved', $id );
+				} elseif ( in_array( $new_status, [ 'suspended', 'rejected' ], true ) ) {
+					do_action( 'partner_program_affiliate_suspended', $id );
+				}
+			}
 		}
 
 		wp_safe_redirect( add_query_arg( 'saved', 1, self::edit_url( $id ) ) );

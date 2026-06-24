@@ -100,12 +100,13 @@ final class ApplicationForm {
 		}
 
 		$ip_hash = Tracker::ip_hash();
-		// Simple rate-limit: 1 submission per IP per minute.
+		// Simple rate-limit: 1 submission per IP per minute. The guard is *set*
+		// only after a submission is accepted (below), so a validation error
+		// doesn't lock the applicant out of correcting and resubmitting.
 		$rl_key = 'pp_apply_rl_' . $ip_hash;
 		if ( $ip_hash && get_transient( $rl_key ) ) {
 			$this->redirect_back( __( 'Please wait before submitting again.', 'partner-program' ), 'error' );
 		}
-		set_transient( $rl_key, 1, MINUTE_IN_SECONDS );
 
 		$data         = [];
 		$uploaded_ids = [];
@@ -172,6 +173,11 @@ final class ApplicationForm {
 
 		if ( $errors ) {
 			$this->redirect_back( implode( ' ', $errors ), 'error' );
+		}
+
+		// Submission is valid and about to be stored — now arm the rate limit.
+		if ( $ip_hash ) {
+			set_transient( $rl_key, 1, MINUTE_IN_SECONDS );
 		}
 
 		$application_id = ApplicationRepo::create(

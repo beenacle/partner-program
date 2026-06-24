@@ -4,7 +4,7 @@ Tags: affiliate, partner, woocommerce, referral, commission
 Requires at least: 6.2
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.5.0
+Stable tag: 1.5.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -52,6 +52,22 @@ If both refer to the same affiliate, the source is recorded as `both` and the co
 Generate a payout batch from *Partner Program → Payouts*. Download the CSV, send funds via your preferred method (ACH, PayPal, Zelle, CashApp, Wise, check), then click "Mark paid" so commissions roll to status `paid`.
 
 == Changelog ==
+
+= 1.5.1 =
+QA hardening pass (money/payout/security fixes):
+* Security: applicant ID / business-proof uploads are now relocated outside the web root (above the document root) so they can't be fetched directly on servers that ignore .htaccess (e.g. Nginx/Kinsta); image thumbnails of them are no longer generated; the admin download proxy reads the relocated file, and it's removed when the attachment is deleted.
+* Refunds: partial-refund commission clawback now measures the refunded amount on the same basis as the commission (product subtotal after discount, excluding tax/shipping when configured) — a shipping- or tax-only refund no longer wrongly reduces the commission. Removing/reducing a refund now recomputes and restores the commission (new woocommerce_refund_deleted listener).
+* Payouts: reverting a queued payout now deletes its item rows — prevents a UNIQUE-key collision that could drop a re-claimed commission's item and pay it twice; reverted payouts are also excluded from the batch CSV.
+* Payouts: CSV export neutralizes spreadsheet formula injection in partner-controlled cells (name, payout account/details); payout_account column now also falls back to the `routing` field.
+* Affiliates: changing status to suspended/rejected (or back to approved) via the edit form now fires the status events, so the coupon is actually deactivated/restored and emails send — previously only the quick-action buttons did. A 0% custom-rate override now saves correctly.
+* Commissions: bulk approve/reject/clawback no longer mutates already-paid or already-queued commissions (was corrupting paid totals and the payout ledger).
+* Commissions: self-referral guard — an affiliate no longer earns commission on their own purchase (own ?ref= link or coupon); effective rate is clamped to 100%; hold release uses the order's paid/created date instead of import-time.
+* Refunds: reject/clawback appends to the notes column instead of overwriting the partial-refund idempotency markers.
+* Tracking: referral cookie is now httponly; visit dedup sets its guard before the insert and bounds growth when the IP is unresolvable.
+* Application: the per-IP rate limit is armed only after a submission validates, so a corrected resubmission isn't blocked; approval is now idempotent against double-submits.
+* Portal: "Approved / eligible for next payout" excludes commissions already swept into a queued payout. Tier progress now shows the entry tier as a target for sub-floor partners.
+* Emails: transactional emails now render through WooCommerce's native email template (wrap_message), so they match the store's order emails and inherit the merchant's email branding (header image, colours, footer) from WooCommerce > Settings > Emails — instead of the previous standalone shell.
+* Emails: the "payout sent" notification reported the wrong amount ($0.00) because it read a non-existent `amount_cents` column instead of `total_amount_cents` — fixed. Currency amounts in email subjects (and other plain-text contexts) no longer show the raw `&#36;` HTML entity instead of the symbol.
 
 = 1.5.0 =
 * Portal: new Training tab with admin-editable training modules (`pp_module` CPT) and a compliance certification quiz.

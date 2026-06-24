@@ -12,6 +12,7 @@ namespace PartnerProgram\Woo;
 
 use PartnerProgram\Domain\AffiliateRepo;
 use PartnerProgram\Domain\CommissionRepo;
+use PartnerProgram\Support\Money;
 use PartnerProgram\Support\SettingsRepo;
 use PartnerProgram\Tracking\Tracker;
 
@@ -31,6 +32,9 @@ final class OrderHooks {
 		add_action( 'woocommerce_order_status_completed', [ $this, 'record_commission' ], 20, 1 );
 		add_action( 'woocommerce_order_status_refunded', [ $this, 'reject_on_refund' ], 10, 1 );
 		add_action( 'woocommerce_order_refunded', [ $this, 'partial_refund_handler' ], 10, 2 );
+		// Recompute when a refund is removed (un-refunded), so the commission
+		// recovers toward its original amount instead of staying clawed back.
+		add_action( 'woocommerce_refund_deleted', [ $this, 'on_refund_deleted' ], 10, 2 );
 		add_action( 'woocommerce_order_status_cancelled', [ $this, 'reject_on_status' ], 10, 1 );
 		add_action( 'woocommerce_order_status_failed', [ $this, 'reject_on_status' ], 10, 1 );
 
@@ -214,11 +218,32 @@ final class OrderHooks {
 	}
 
 	public function partial_refund_handler( int $order_id, int $refund_id ): void {
+		unset( $refund_id );
+		$this->recompute_for_refunds( $order_id );
+	}
+
+	/**
+	 * woocommerce_refund_deleted fires as ( $refund_id, $order_id ).
+	 */
+	public function on_refund_deleted( int $refund_id, int $order_id ): void {
+		unset( $refund_id );
+		$this->recompute_for_refunds( $order_id );
+	}
+
+	/**
+	 * Recompute each commission from the order's CURRENT refund state. Driving
+	 * off the live total (rather than per-refund deltas) makes this naturally
+	 * idempotent and lets a removed/reduced refund restore the commission.
+	 *
+	 * The refunded amount is measured on the SAME basis as the commission —
+	 * product subtotal after discount, excluding tax/shipping when those are
+	 * excluded — so a shipping- or tax-only refund doesn't wrongly claw back a
+	 * commission whose base never included them.
+	 */
+	private function recompute_for_refunds( int $order_id ): void {
+		$settings = new SettingsRepo();
 		// Respect the admin's "Adjust commissions on partial refunds" toggle.
-		// Without this gate the handler always ran regardless of the setting,
-		// making the checkbox a placebo. Default-on so behaviour for sites
-		// that never touched the setting is unchanged.
-		if ( ! (bool) ( new SettingsRepo() )->get( 'commissions.partial_refund_clawback', true ) ) {
+		if ( ! (bool) $settings->get( 'commissions.partial_refund_clawback', true ) ) {
 			return;
 		}
 		$order = wc_get_order( $order_id );
@@ -229,33 +254,34 @@ final class OrderHooks {
 		if ( ! $commissions ) {
 			return;
 		}
-		$total          = (float) $order->get_total();
-		$refunded_total = (float) $order->get_total_refunded();
-		if ( $refunded_total <= 0 || $total <= 0 ) {
-			return;
-		}
-		$ratio = max( 0.0, min( 1.0, ( $total - $refunded_total ) / $total ) );
+
+		$exclude_tax      = (bool) $settings->get( 'commissions.exclude_tax', true );
+		$exclude_shipping = (bool) $settings->get( 'commissions.exclude_shipping', true );
+
+		$refunded_basis = (float) $order->get_total_refunded()
+			- ( $exclude_tax ? (float) $order->get_total_tax_refunded() : 0.0 )
+			- ( $exclude_shipping ? (float) $order->get_total_shipping_refunded() : 0.0 );
+		$refunded_cents = max( 0, Money::to_cents( max( 0.0, $refunded_basis ) ) );
 
 		foreach ( $commissions as $row ) {
 			if ( in_array( $row['status'], [ 'paid', 'rejected' ], true ) ) {
 				continue;
 			}
-			// Wrap the refund-id in delimiters so `refund_id=10` doesn't
-			// false-match against an earlier `refund_id=100` already in
-			// notes (substring containment) and silently skip the second
-			// adjustment.
-			$marker = sprintf( '[refund_id=%d]', $refund_id );
-			$prior  = (string) ( $row['notes'] ?? '' );
-			if ( '' !== $prior && false !== strpos( $prior, $marker ) ) {
-				continue; // Same refund already applied; idempotent on retries.
+			$base     = (int) $row['base_amount_cents'];
+			$original = (int) $row['original_amount_cents'];
+			if ( $base <= 0 ) {
+				continue;
 			}
-			// Scale from the immutable original commission amount, not the
-			// current (possibly already-reduced) amount_cents — otherwise a
-			// second partial refund decays geometrically off the result of
-			// the first one.
-			$new_amount = (int) round( (int) $row['original_amount_cents'] * $ratio );
-			$entry      = sprintf( 'Adjusted for partial refund %s (ratio=%.4f)', $marker, $ratio );
-			$notes      = '' === $prior ? $entry : trim( $prior ) . "\n" . $entry;
+			$remaining  = max( 0, $base - $refunded_cents );
+			$new_amount = (int) max( 0, min( $original, (int) round( $original * ( $remaining / $base ) ) ) );
+			if ( $new_amount === (int) $row['amount_cents'] ) {
+				continue; // Nothing changed — don't churn the row or notes.
+			}
+			$entry = 0 === $refunded_cents
+				? 'Refund(s) reversed — commission restored to original.'
+				: sprintf( 'Adjusted for refunds: %s of %s commissionable refunded.', Money::format( $refunded_cents ), Money::format( $base ) );
+			$prior = trim( (string) ( $row['notes'] ?? '' ) );
+			$notes = '' === $prior ? $entry : $prior . "\n" . $entry;
 			CommissionRepo::update(
 				(int) $row['id'],
 				[
@@ -272,11 +298,16 @@ final class OrderHooks {
 			if ( 'paid' === $row['status'] ) {
 				continue; // never auto-revert paid; admin can clawback manually.
 			}
+			// Append, don't overwrite: notes may hold the partial-refund
+			// [refund_id=N] idempotency markers and adjustment/admin history.
+			// Clobbering them can let the same refund be applied twice later.
+			$prior = trim( (string) ( $row['notes'] ?? '' ) );
+			$notes = '' === $prior ? $reason : $prior . "\n" . $reason;
 			CommissionRepo::update(
 				(int) $row['id'],
 				[
 					'status' => $status,
-					'notes'  => $reason,
+					'notes'  => $notes,
 				]
 			);
 		}

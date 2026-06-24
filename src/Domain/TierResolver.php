@@ -186,8 +186,15 @@ final class TierResolver {
 		}
 
 		// `tiers()` already sorts by min, so the next tier is the next index.
+		// When no tier matched (sales below the lowest tier's min, e.g. a sales
+		// floor with no zero-tier), point at the first tier as the goal so new
+		// partners still see a target instead of a blank progress widget.
 		$current = null !== $current_idx ? $tiers[ $current_idx ] : null;
-		$next    = null !== $current_idx && isset( $tiers[ $current_idx + 1 ] ) ? $tiers[ $current_idx + 1 ] : null;
+		if ( null !== $current_idx ) {
+			$next = $tiers[ $current_idx + 1 ] ?? null;
+		} else {
+			$next = $tiers[0] ?? null;
+		}
 
 		return [
 			'current_sales_cents' => $sales_cents,

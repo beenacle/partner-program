@@ -54,7 +54,9 @@ final class Tracker {
 					'path'     => COOKIEPATH ? COOKIEPATH : '/',
 					'domain'   => COOKIE_DOMAIN ? COOKIE_DOMAIN : '',
 					'secure'   => is_ssl(),
-					'httponly' => false,
+					// Nothing reads pp_ref from JS (the link builder uses REST),
+					// so keep it out of reach of third-party / injected scripts.
+					'httponly' => true,
 					'samesite' => 'Lax',
 				]
 			);
@@ -72,10 +74,18 @@ final class Tracker {
 		// hits from the same IP+code within a 1-hour window via a transient.
 		// Transients fall back to options when no object cache is present, so
 		// this also works on vanilla shared hosting.
-		$dedup_key = 'pp_visit_' . md5( $code . '|' . $ip_hash );
-		if ( $ip_hash && get_transient( $dedup_key ) ) {
+		// With no resolvable IP (e.g. missing REMOTE_ADDR), fall back to a
+		// coarse UA-based key so a ?ref= bot can't insert unbounded visit rows.
+		$dedup_seed = '' !== $ip_hash
+			? $ip_hash
+			: 'ua:' . md5( isset( $_SERVER['HTTP_USER_AGENT'] ) ? (string) $_SERVER['HTTP_USER_AGENT'] : 'none' );
+		$dedup_key  = 'pp_visit_' . md5( $code . '|' . $dedup_seed );
+		if ( get_transient( $dedup_key ) ) {
 			return;
 		}
+		// Set the guard *before* the INSERT so two concurrent same-key hits
+		// don't both slip through the check-then-set window.
+		set_transient( $dedup_key, 1, HOUR_IN_SECONDS );
 
 		global $wpdb;
 		$wpdb->insert(
@@ -90,10 +100,6 @@ final class Tracker {
 				'created_at'    => current_time( 'mysql', true ),
 			]
 		);
-
-		if ( $ip_hash ) {
-			set_transient( $dedup_key, 1, HOUR_IN_SECONDS );
-		}
 	}
 
 	public static function ip_hash(): string {

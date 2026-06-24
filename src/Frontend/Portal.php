@@ -354,7 +354,10 @@ final class Portal {
 	private function build_context( array $affiliate, SettingsRepo $settings ): array {
 		$affiliate_id = (int) $affiliate['id'];
 		$pending = CommissionRepo::sum_for_affiliate( $affiliate_id, 'pending' );
-		$approved = CommissionRepo::sum_for_affiliate( $affiliate_id, 'approved' );
+		// "Eligible for next payout" must exclude commissions already swept into
+		// a queued payout (still status 'approved' until marked paid), else the
+		// balance/threshold bar keeps counting money that's already queued.
+		$approved = CommissionRepo::sum_unclaimed_for_affiliate( $affiliate_id );
 		$paid     = CommissionRepo::sum_for_affiliate( $affiliate_id, 'paid' );
 
 		$tier_progress   = TierResolver::progress_for_affiliate( $affiliate_id );

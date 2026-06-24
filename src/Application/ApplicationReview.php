@@ -38,6 +38,18 @@ final class ApplicationReview {
 			exit;
 		}
 
+		// Only a pending application can be reviewed. WP nonces aren't
+		// single-use, so without this a double-submit re-runs approve()/reject()
+		// — re-firing approval emails and re-activating coupons that may have
+		// been deliberately deactivated since.
+		if ( 'pending' !== (string) $application['status'] ) {
+			wp_safe_redirect( add_query_arg(
+				[ 'page' => 'partner-program-applications', 'id' => $application_id, 'reviewed' => 'already' ],
+				admin_url( 'admin.php' )
+			) );
+			exit;
+		}
+
 		$result = true;
 		if ( 'approve' === $action ) {
 			$result = $this->approve( $application, $notes );

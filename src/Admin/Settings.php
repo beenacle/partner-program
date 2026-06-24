@@ -900,7 +900,7 @@ final class Settings {
 			case 'coupon_bonus':
 				$repo->save_section( 'coupon_bonus', [
 					'enabled'    => ! empty( $_POST['enabled'] ),
-					'bonus_rate' => (float) ( $_POST['bonus_rate'] ?? 0 ),
+					'bonus_rate' => max( 0.0, min( 100.0, (float) ( $_POST['bonus_rate'] ?? 0 ) ) ),
 				] );
 				break;
 

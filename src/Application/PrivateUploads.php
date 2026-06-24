@@ -31,10 +31,13 @@ final class PrivateUploads {
 	public const DIR_BASENAME = 'partner-program-private';
 	public const META_FLAG    = '_pp_private';
 	public const META_ORIG    = '_pp_original_filename';
+	public const META_PATH    = '_pp_private_path';
 	public const NONCE_ACTION = 'pp_download_private';
 
 	public function register(): void {
 		add_action( 'admin_post_' . self::NONCE_ACTION, [ $this, 'handle_download' ] );
+		// Remove the relocated off-webroot file when its attachment is deleted.
+		add_action( 'delete_attachment', [ __CLASS__, 'cleanup_private_file' ] );
 	}
 
 	/**
@@ -68,10 +71,15 @@ final class PrivateUploads {
 		};
 
 		add_filter( 'upload_dir', $reroute );
+		// Don't generate web-served thumbnails of a private ID/KYC image —
+		// otherwise the resized copies leak the document even after the
+		// original is relocated off the web root.
+		add_filter( 'intermediate_image_sizes_advanced', '__return_empty_array', 99 );
 		try {
 			return $cb( $rename );
 		} finally {
 			remove_filter( 'upload_dir', $reroute );
+			remove_filter( 'intermediate_image_sizes_advanced', '__return_empty_array', 99 );
 		}
 	}
 
@@ -84,6 +92,64 @@ final class PrivateUploads {
 		update_post_meta( $attachment_id, self::META_FLAG, '1' );
 		if ( '' !== $original_filename ) {
 			update_post_meta( $attachment_id, self::META_ORIG, sanitize_file_name( $original_filename ) );
+		}
+		self::relocate_off_webroot( $attachment_id );
+	}
+
+	/**
+	 * Move the uploaded file out of the web-served uploads tree into a
+	 * directory ABOVE the web root, so it can't be fetched directly on servers
+	 * that ignore .htaccess (e.g. Nginx/Kinsta). The download proxy reads the
+	 * recorded absolute path. If no writable off-webroot dir exists we leave
+	 * the file in the .htaccess-protected uploads subdir (no regression).
+	 */
+	private static function relocate_off_webroot( int $attachment_id ): void {
+		$src = get_attached_file( $attachment_id );
+		if ( ! $src || ! is_readable( $src ) ) {
+			return;
+		}
+		$ext_dir = self::external_basedir();
+		if ( null === $ext_dir ) {
+			return;
+		}
+		$dest = trailingslashit( $ext_dir ) . wp_basename( $src );
+		if ( file_exists( $dest ) ) {
+			$dest = trailingslashit( $ext_dir ) . wp_generate_password( 12, false, false ) . '-' . wp_basename( $src );
+		}
+		if ( @rename( $src, $dest ) ) { // phpcs:ignore WordPress.PHP.NoSilencedErrors,WordPress.WP.AlternativeFunctions.rename
+			update_post_meta( $attachment_id, self::META_PATH, $dest );
+		}
+	}
+
+	/**
+	 * A directory above the web root for private files, created and deny-listed.
+	 * Returns null when its parent isn't writable, in which case callers keep
+	 * the file in the uploads subdir behind .htaccess.
+	 */
+	public static function external_basedir(): ?string {
+		$parent = dirname( untrailingslashit( ABSPATH ) );
+		if ( '' === $parent || ! is_dir( $parent ) || ! wp_is_writable( $parent ) ) {
+			return null;
+		}
+		$dir = trailingslashit( $parent ) . self::DIR_BASENAME;
+		if ( ! file_exists( $dir ) && ! wp_mkdir_p( $dir ) ) {
+			return null;
+		}
+		$htaccess = $dir . '/.htaccess';
+		if ( ! file_exists( $htaccess ) ) {
+			@file_put_contents( $htaccess, "Require all denied\nDeny from all\n" ); // phpcs:ignore WordPress.PHP.NoSilencedErrors,WordPress.WP.AlternativeFunctions.file_system_read_file_put_contents
+		}
+		return $dir;
+	}
+
+	/**
+	 * Remove the relocated off-webroot file when its attachment is deleted —
+	 * WordPress only knows about the (now-empty) uploads path.
+	 */
+	public static function cleanup_private_file( int $attachment_id ): void {
+		$path = (string) get_post_meta( $attachment_id, self::META_PATH, true );
+		if ( '' !== $path && is_file( $path ) ) {
+			@unlink( $path ); // phpcs:ignore WordPress.PHP.NoSilencedErrors,WordPress.WP.AlternativeFunctions.file_system_delete_unlink
 		}
 	}
 
@@ -121,7 +187,12 @@ final class PrivateUploads {
 			wp_die( esc_html__( 'File not allowed.', 'partner-program' ), '', [ 'response' => 403 ] );
 		}
 
-		$path = get_attached_file( $id );
+		// Prefer the relocated off-webroot path; fall back to the WP-managed
+		// uploads path for files stored before the relocation logic existed.
+		$path = (string) get_post_meta( $id, self::META_PATH, true );
+		if ( '' === $path ) {
+			$path = (string) get_attached_file( $id );
+		}
 		if ( ! $path || ! is_readable( $path ) ) {
 			wp_die( esc_html__( 'File missing on disk.', 'partner-program' ), '', [ 'response' => 404 ] );
 		}

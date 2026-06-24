@@ -163,6 +163,13 @@ final class CommissionsScreen {
 			if ( ! $before || $before['status'] === $new_status ) {
 				continue; // No-op: skip the row + its action.
 			}
+			// Never silently mutate a commission that was already paid out (or
+			// already claimed into a queued payout). Overwriting its status
+			// desyncs the payout ledger and corrupts paid totals with no audit
+			// trail. Reverse the payout first if it really needs clawing back.
+			if ( 'paid' === $before['status'] || ! empty( $before['payout_id'] ) ) {
+				continue;
+			}
 			CommissionRepo::update( $id, [ 'status' => $new_status ] );
 			if ( isset( $action_map[ $new_status ] ) ) {
 				do_action( $action_map[ $new_status ], $id );

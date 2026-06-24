@@ -95,7 +95,7 @@ final class Mailer {
 		/** @var string $body_plain */
 		$body_plain = (string) apply_filters( 'partner_program_email_body', $body_plain, $event, $tokens, $context );
 
-		$body_html = self::wrap_html( $body_plain, $tokens );
+		$body_html = self::wrap_html( $body_plain, $subject );
 
 		$headers = self::build_headers( $settings );
 
@@ -232,7 +232,9 @@ final class Mailer {
 		$tokens = [
 			'{program_name}' => self::program_name( $settings ),
 			'{partner_name}' => $user->display_name,
-			'{amount}'       => Money::format( (int) ( $payout['amount_cents'] ?? 0 ) ),
+			// The payouts table column is total_amount_cents — `amount_cents`
+			// doesn't exist, so this email used to say "$0.00" every time.
+			'{amount}'       => Money::format( (int) ( $payout['total_amount_cents'] ?? 0 ) ),
 			'{method}'       => (string) ( $payout['method'] ?? '' ),
 			'{reference}'    => (string) ( $payout['reference'] ?? '' ),
 			'{portal_url}'   => self::portal_url(),
@@ -284,25 +286,28 @@ final class Mailer {
 	}
 
 	/**
-	 * Wrap a plain-text body in the branded HTML shell. Author-supplied
-	 * HTML in the body is preserved (passed through wp_kses_post in the
-	 * wrapper); plain newlines are converted via wpautop.
-	 *
-	 * @param array<string,mixed> $tokens
+	 * Wrap the body in WooCommerce's native email template so partner emails
+	 * match the store's transactional emails and inherit the merchant's email
+	 * branding (header image, base/background colours, footer) from
+	 * WooCommerce > Settings > Emails. $heading becomes the email's H1.
 	 */
-	private static function wrap_html( string $body, array $tokens ): string {
-		$settings = new SettingsRepo();
-		return Template::render(
-			'emails/wrapper.php',
-			[
-				'body'         => $body,
-				'tokens'       => $tokens,
-				'program_name' => self::program_name( $settings ),
-				'logo_url'     => (string) $settings->get( 'general.logo_url', '' ),
-				'accent_color' => (string) $settings->get( 'general.accent_color', '#2563eb' ),
-				'footer_text'  => self::footer_text( $settings ),
-			]
-		);
+	private static function wrap_html( string $body, string $heading = '' ): string {
+		// Author HTML is trusted (already sanitized upstream); plain text gets
+		// auto-paragraphed so newlines render.
+		$content = ( false !== stripos( $body, '<p' ) || false !== stripos( $body, '<br' ) )
+			? wp_kses_post( $body )
+			: wpautop( wp_kses_post( $body ) );
+
+		if ( function_exists( 'WC' ) && WC() && WC()->mailer() ) {
+			$mailer  = WC()->mailer();
+			$wrapped = $mailer->wrap_message( $heading, $content );
+			// Inline the CSS so colours survive email clients that strip <style>.
+			return method_exists( $mailer, 'style_inline' ) ? (string) $mailer->style_inline( $wrapped ) : $wrapped;
+		}
+
+		// WooCommerce is a hard dependency, so this is effectively unreachable;
+		// degrade to the raw HTML rather than fatally erroring.
+		return $content;
 	}
 
 	private static function build_headers( SettingsRepo $settings ): array {

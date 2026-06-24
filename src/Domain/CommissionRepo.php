@@ -187,6 +187,22 @@ final class CommissionRepo {
 		return (int) $wpdb->get_var( $wpdb->prepare( $sql, ...$params ) );
 	}
 
+	/**
+	 * Approved commissions not yet claimed into a payout — the amount that is
+	 * genuinely "eligible for next payout". Mirrors the batch generator's
+	 * eligibility (status='approved' AND payout_id IS NULL) so the portal's
+	 * Approved/threshold figures drop the moment a batch sweeps them up.
+	 */
+	public static function sum_unclaimed_for_affiliate( int $affiliate_id ): int {
+		global $wpdb;
+		return (int) $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT COALESCE(SUM(amount_cents),0) FROM ' . self::table() . " WHERE affiliate_id = %d AND status = 'approved' AND payout_id IS NULL",
+				$affiliate_id
+			)
+		);
+	}
+
 	public static function search( array $args = [] ): array {
 		global $wpdb;
 		$args = wp_parse_args(
