@@ -19,7 +19,7 @@ global $wpdb;
 $tables = [
 	'pp_affiliates', 'pp_applications', 'pp_visits', 'pp_commissions',
 	'pp_payouts', 'pp_payout_items', 'pp_agreements',
-	'pp_agreement_acceptances', 'pp_logs',
+	'pp_agreement_acceptances', 'pp_certifications', 'pp_logs',
 ];
 foreach ( $tables as $t ) {
 	$wpdb->query( 'DROP TABLE IF EXISTS ' . $wpdb->prefix . $t );

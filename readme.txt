@@ -4,7 +4,7 @@ Tags: affiliate, partner, woocommerce, referral, commission
 Requires at least: 6.2
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.4.1
+Stable tag: 1.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -52,6 +52,14 @@ If both refer to the same affiliate, the source is recorded as `both` and the co
 Generate a payout batch from *Partner Program → Payouts*. Download the CSV, send funds via your preferred method (ACH, PayPal, Zelle, CashApp, Wise, check), then click "Mark paid" so commissions roll to status `paid`.
 
 == Changelog ==
+
+= 1.5.0 =
+* Portal: new Training tab with admin-editable training modules (`pp_module` CPT) and a compliance certification quiz.
+* Certification: configurable pass mark, electronic-signature acknowledgment, and per-attempt evidence recorded to `pp_certifications` (score, signature, IP hash, timestamp, quiz version). Quiz version auto-increments on content change to force re-certification.
+* Certification gating: optionally lock referral links/coupon (or the whole portal) until a partner certifies.
+* Application: research-use-only acknowledgment block above the form, optional full-policy link, and updated compliance checkbox label.
+* Reliability: public application and login forms now refresh their nonce from an uncached REST endpoint and fail gracefully on an expired nonce, so submissions are no longer silently lost on full-page-cached (e.g. Kinsta) pages.
+* WP-CLI: `wp partner-program seed-training` seeds the default Module 1 (Compliance Fundamentals).
 
 = 1.4.1 =
 * Admin: manual add-affiliate flow with WordPress user autocomplete.

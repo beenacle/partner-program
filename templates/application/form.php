@@ -3,6 +3,8 @@
  * @var array  $fields
  * @var \PartnerProgram\Support\SettingsRepo $settings
  * @var array|null $flash
+ * @var string $intro_html  Compliance acknowledgment shown above the form.
+ * @var string $policy_url  Link to the full compliance policy (optional).
  * @var string $action
  * @var string $nonce  Pre-rendered nonce field HTML.
  */
@@ -10,6 +12,10 @@ defined( 'ABSPATH' ) || exit;
 
 $program = (string) $settings->get( 'general.program_name', __( 'Partner Program', 'partner-program' ) );
 $accent  = (string) $settings->get( 'general.accent_color', '#2563eb' );
+$intro   = isset( $intro_html ) ? (string) $intro_html : '';
+$policy  = isset( $policy_url ) ? (string) $policy_url : '';
+// Replace the {program_name} token so the acknowledgment white-labels per site.
+$intro   = str_replace( '{program_name}', esc_html( $program ), $intro );
 ?>
 <div class="pp-application" style="--pp-accent: <?php echo esc_attr( $accent ); ?>;">
 	<h2><?php echo esc_html( sprintf( __( 'Apply to the %s', 'partner-program' ), $program ) ); ?></h2>
@@ -20,7 +26,16 @@ $accent  = (string) $settings->get( 'general.accent_color', '#2563eb' );
 		</div>
 	<?php endif; ?>
 
-	<form method="post" action="<?php echo esc_url( $action ); ?>" enctype="multipart/form-data" class="pp-form">
+	<?php if ( '' !== trim( $intro ) ) : ?>
+		<div class="pp-compliance-notice">
+			<?php echo wp_kses_post( wpautop( $intro ) ); ?>
+			<?php if ( '' !== $policy ) : ?>
+				<p class="pp-policy-link"><a href="<?php echo esc_url( $policy ); ?>" target="_blank" rel="noopener noreferrer"><?php esc_html_e( 'Read the full Affiliate Compliance Policy', 'partner-program' ); ?></a></p>
+			<?php endif; ?>
+		</div>
+	<?php endif; ?>
+
+	<form method="post" action="<?php echo esc_url( $action ); ?>" enctype="multipart/form-data" class="pp-form" data-pp-refresh-nonce data-pp-nonce-action="partner_program_apply" data-pp-nonce-field="_pp_apply_nonce">
 		<input type="hidden" name="action" value="partner_program_apply" />
 		<?php echo $nonce; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 		<div style="display:none" aria-hidden="true">

@@ -31,11 +31,18 @@ $program = (string) $settings->get( 'general.program_name', __( 'Partner Program
 $tabs    = [
 	'overview'    => __( 'Overview', 'partner-program' ),
 	'links'       => __( 'Links & Codes', 'partner-program' ),
+	'training'    => __( 'Training', 'partner-program' ),
 	'materials'   => __( 'Materials', 'partner-program' ),
 	'compliance'  => __( 'Compliance', 'partner-program' ),
 	'commissions' => __( 'Commissions', 'partner-program' ),
 	'payouts'     => __( 'Payouts', 'partner-program' ),
 ];
+
+$cert_enabled   = ! empty( $cert_enabled );
+$is_certified   = ! empty( $is_certified );
+$cert_gate_mode = isset( $cert_gate_mode ) ? (string) $cert_gate_mode : 'links';
+$gate_active    = $cert_enabled && ! $is_certified && 'none' !== $cert_gate_mode;
+$training_url   = esc_url( add_query_arg( 'tab', 'training', $portal_url ) );
 ?>
 <div class="pp-portal" style="--pp-accent: <?php echo esc_attr( (string) $settings->get( 'general.accent_color', '#2563eb' ) ); ?>;">
 	<header class="pp-portal-header">
@@ -61,6 +68,40 @@ $tabs    = [
 		<?php endforeach; ?>
 	</nav>
 
+	<?php
+	// phpcs:disable WordPress.Security.NonceVerification.Recommended
+	if ( isset( $_GET['certified'] ) ) :
+		?>
+		<div class="pp-alert pp-alert-success"><?php esc_html_e( 'Certification complete. Your training record has been saved and your account is now fully active.', 'partner-program' ); ?></div>
+	<?php elseif ( isset( $_GET['cert_failed'] ) ) : ?>
+		<div class="pp-alert pp-alert-error">
+			<?php
+			$score_q = isset( $_GET['cert_score'] ) ? (int) $_GET['cert_score'] : 0;
+			/* translators: %d: quiz score percentage. */
+			echo esc_html( sprintf( __( 'You scored %d%%, which is below the passing mark. Please review the training and try again.', 'partner-program' ), $score_q ) );
+			?>
+		</div>
+	<?php elseif ( isset( $_GET['cert_error'] ) ) : ?>
+		<div class="pp-alert pp-alert-error">
+			<?php
+			if ( 'expired' === sanitize_key( (string) wp_unslash( $_GET['cert_error'] ) ) ) {
+				esc_html_e( 'Your session expired before the quiz was submitted. Please review your answers and submit again.', 'partner-program' );
+			} else {
+				esc_html_e( 'Please answer the questions, sign, and check the acknowledgment box before submitting.', 'partner-program' );
+			}
+			?>
+		</div>
+	<?php endif; ?>
+	<?php
+	// phpcs:enable WordPress.Security.NonceVerification.Recommended
+	if ( $gate_active && 'training' !== $active_tab ) :
+		?>
+		<div class="pp-alert pp-alert-warning">
+			<?php esc_html_e( 'Complete your compliance certification to unlock your referral links and start earning.', 'partner-program' ); ?>
+			<a href="<?php echo $training_url; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>"><?php esc_html_e( 'Go to Training', 'partner-program' ); ?></a>
+		</div>
+	<?php endif; ?>
+
 	<main class="pp-tab-content">
 		<?php
 		switch ( $active_tab ) {
@@ -69,6 +110,9 @@ $tabs    = [
 				break;
 			case 'links':
 				Template::output( 'portal/tab-links.php', get_defined_vars() );
+				break;
+			case 'training':
+				Template::output( 'portal/tab-training.php', get_defined_vars() );
 				break;
 			case 'materials':
 				Template::output( 'portal/tab-materials.php', get_defined_vars() );

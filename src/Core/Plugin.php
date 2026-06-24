@@ -100,6 +100,10 @@ final class Plugin {
 		Capabilities::grant_admin_caps();
 		Encryption::ensure_key();
 		Activator::schedule_crons();
+		// Create the default training modules (idempotent via a seed-key meta)
+		// so the portal Training tab isn't empty after an auto-update — the
+		// CPT is registered on `init`, which has already run by `admin_init`.
+		Seeder::seed_modules();
 		update_option( 'partner_program_db_version', PARTNER_PROGRAM_VERSION );
 	}
 

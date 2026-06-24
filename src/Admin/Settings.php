@@ -41,6 +41,7 @@ final class Settings {
 			'tracking'     => __( 'Tracking', 'partner-program' ),
 			'hold_payouts' => __( 'Hold & Payouts', 'partner-program' ),
 			'application'  => __( 'Application Form', 'partner-program' ),
+			'certification' => __( 'Certification', 'partner-program' ),
 			'compliance'   => __( 'Compliance', 'partner-program' ),
 			'exclusions'   => __( 'Exclusions', 'partner-program' ),
 			'emails'       => __( 'Emails', 'partner-program' ),
@@ -95,6 +96,7 @@ final class Settings {
 			case 'tracking':      self::tab_tracking( $settings ); break;
 			case 'hold_payouts':  self::tab_hold_payouts( $settings ); break;
 			case 'application':   self::tab_application( $settings ); break;
+			case 'certification': self::tab_certification( $settings ); break;
 			case 'compliance':    self::tab_compliance( $settings ); break;
 			case 'exclusions':    self::tab_exclusions( $settings ); break;
 			case 'emails':        self::tab_emails( $settings ); break;
@@ -385,6 +387,21 @@ final class Settings {
 	}
 
 	private static function tab_application( SettingsRepo $s ): void {
+		echo '<h2>' . esc_html__( 'Compliance acknowledgment', 'partner-program' ) . '</h2>';
+		echo '<table class="form-table">';
+		printf(
+			'<tr><th scope="row"><label for="intro_html">%s</label></th><td>',
+			esc_html__( 'Acknowledgment shown above the form', 'partner-program' )
+		);
+		wp_editor(
+			(string) $s->get( 'application.intro_html', '' ),
+			'intro_html',
+			[ 'textarea_name' => 'intro_html', 'textarea_rows' => 4, 'media_buttons' => false ]
+		);
+		echo '<p class="description">' . esc_html__( 'Shown as a notice above the application form. Use {program_name} to insert the program name. Pair this with a required checkbox field below.', 'partner-program' ) . '</p></td></tr>';
+		self::field_text( 'policy_url', __( 'Full compliance policy URL', 'partner-program' ), (string) $s->get( 'application.policy_url' ), __( 'Optional. Adds a "Read the full Affiliate Compliance Policy" link under the acknowledgment.', 'partner-program' ), 'url' );
+		echo '</table>';
+
 		echo '<p class="description">' . esc_html__( 'Edit the public application form below. Reorder rows with the ▲▼ buttons, add or remove rows with the buttons in each row, and toggle the Required column to mark a field mandatory. For Select fields, use the inline editor in the Options column to manage choices.', 'partner-program' ) . '</p>';
 
 		echo '<h2>' . esc_html__( 'Form fields', 'partner-program' ) . '</h2>';
@@ -416,6 +433,129 @@ final class Settings {
 		echo '<template id="pp-option-row-template">' . self::render_option_row( [], '__I__', '__J__' ) . '</template>';
 
 		self::print_application_styles_and_script();
+	}
+
+	private static function tab_certification( SettingsRepo $s ): void {
+		echo '<p class="description">' . esc_html__( 'Partners take this quiz inside the portal Training tab. Passing records an electronic signature and timestamp as their training evidence.', 'partner-program' ) . '</p>';
+		echo '<table class="form-table">';
+		self::field_checkbox( 'cert_enabled', __( 'Enable certification', 'partner-program' ), (bool) $s->get( 'certification.enabled' ) );
+		self::field_select(
+			'gate_mode',
+			__( 'Gating', 'partner-program' ),
+			(string) $s->get( 'certification.gate_mode', 'links' ),
+			[
+				'none'   => __( 'Track only — never block', 'partner-program' ),
+				'links'  => __( 'Lock referral links & coupon until certified', 'partner-program' ),
+				'portal' => __( 'Lock the whole portal until certified', 'partner-program' ),
+			],
+			__( 'What an uncertified partner can still access.', 'partner-program' )
+		);
+		self::field_text( 'pass_pct', __( 'Passing score %', 'partner-program' ), (string) $s->get( 'certification.pass_pct', 80 ), '', 'number' );
+		self::field_checkbox( 'require_signature', __( 'Require a typed electronic signature', 'partner-program' ), (bool) $s->get( 'certification.require_signature' ) );
+		echo '<tr><th scope="row">' . esc_html__( 'Current quiz version', 'partner-program' ) . '</th><td><code>' . esc_html( (string) (int) $s->get( 'certification.quiz_version', 1 ) ) . '</code><p class="description">' . esc_html__( 'Increments automatically when you change the questions, forcing every partner to re-certify.', 'partner-program' ) . '</p></td></tr>';
+
+		printf(
+			'<tr><th scope="row"><label for="acknowledgment_html">%s</label></th><td>',
+			esc_html__( 'Acknowledgment / e-signature text', 'partner-program' )
+		);
+		wp_editor(
+			(string) $s->get( 'certification.acknowledgment_html', '' ),
+			'acknowledgment_html',
+			[ 'textarea_name' => 'acknowledgment_html', 'textarea_rows' => 6, 'media_buttons' => false ]
+		);
+		echo '<p class="description">' . esc_html__( 'Shown above the signature box. Use {program_name} to insert the program name.', 'partner-program' ) . '</p></td></tr>';
+
+		printf(
+			'<tr><th scope="row"><label for="questions">%s</label></th><td>',
+			esc_html__( 'Quiz questions', 'partner-program' )
+		);
+		printf(
+			'<textarea id="questions" name="questions" rows="18" class="large-text code">%s</textarea>',
+			esc_textarea( self::quiz_to_text( (array) $s->get( 'certification.questions', [] ) ) )
+		);
+		echo '<p class="description">' . wp_kses_post( __( 'One question per block, blank line between blocks. First line is the question. Each answer is on its own line: start the <strong>correct</strong> answer with <code>*</code> and the others with <code>-</code>.', 'partner-program' ) ) . '</p>';
+		echo '<pre class="description" style="margin:0;white-space:pre-wrap;">' . esc_html( "What does Research Use Only mean?\n* Laboratory research only\n- A weight-loss product\n- A supplement\n- A prescription drug" ) . '</pre>';
+		echo '</td></tr>';
+		echo '</table>';
+	}
+
+	/**
+	 * Serialize stored quiz questions back into the editable text format
+	 * (see tab_certification): one block per question, `*` marks the correct
+	 * answer, `-` marks the rest.
+	 *
+	 * @param array<int, array<string, mixed>> $questions
+	 */
+	private static function quiz_to_text( array $questions ): string {
+		$blocks = [];
+		foreach ( $questions as $q ) {
+			if ( ! is_array( $q ) ) {
+				continue;
+			}
+			$lines   = [ (string) ( $q['q'] ?? '' ) ];
+			$options = array_values( (array) ( $q['options'] ?? [] ) );
+			$correct = (int) ( $q['correct'] ?? 0 );
+			foreach ( $options as $i => $opt ) {
+				$lines[] = ( $i === $correct ? '* ' : '- ' ) . (string) $opt;
+			}
+			$blocks[] = implode( "\n", $lines );
+		}
+		return implode( "\n\n", $blocks );
+	}
+
+	/**
+	 * Parse the quiz editor text back into structured questions.
+	 *
+	 * @return array<int, array{q:string, options:array<int,string>, correct:int}>
+	 */
+	private static function parse_quiz_text( string $text ): array {
+		$text   = str_replace( "\r\n", "\n", $text );
+		$blocks = preg_split( '/\n\s*\n/', trim( $text ) ) ?: [];
+		$out    = [];
+		foreach ( $blocks as $block ) {
+			$lines = array_values( array_filter( array_map( 'trim', explode( "\n", (string) $block ) ), static function ( $l ) {
+				return '' !== $l;
+			} ) );
+			if ( count( $lines ) < 2 ) {
+				continue;
+			}
+			$question  = sanitize_text_field( (string) array_shift( $lines ) );
+			$options   = [];
+			$correct   = -1;
+			$malformed = false;
+			foreach ( $lines as $line ) {
+				$is_correct = false;
+				if ( 0 === strpos( $line, '*' ) ) {
+					$is_correct = true;
+					$line       = ltrim( substr( $line, 1 ) );
+				} elseif ( 0 === strpos( $line, '-' ) ) {
+					$line = ltrim( substr( $line, 1 ) );
+				}
+				$line = sanitize_text_field( $line );
+				if ( '' === $line ) {
+					// A correct-marker with no answer text (e.g. a stray "*")
+					// is an authoring slip — invalidate the block rather than
+					// silently shifting the answer key onto the first option.
+					if ( $is_correct ) {
+						$malformed = true;
+					}
+					continue;
+				}
+				if ( $is_correct ) {
+					$correct = count( $options );
+				}
+				$options[] = $line;
+			}
+			// Require a clean block: a question, two+ options, and exactly one
+			// explicitly marked ("*") correct answer. We never guess the key —
+			// an unmarked block is dropped (and disappears on reload) so the
+			// admin notices, instead of silently grading option 1 as correct.
+			if ( $malformed || $correct < 0 || count( $options ) < 2 || '' === $question ) {
+				continue;
+			}
+			$out[] = [ 'q' => $question, 'options' => $options, 'correct' => $correct ];
+		}
+		return $out;
 	}
 
 	/**
@@ -822,7 +962,35 @@ final class Settings {
 					$clean[] = $field;
 				}
 				$repo->save_section( 'application', [
-					'fields' => $clean,
+					'fields'     => $clean,
+					'intro_html' => wp_kses_post( wp_unslash( (string) ( $_POST['intro_html'] ?? '' ) ) ),
+					'policy_url' => esc_url_raw( wp_unslash( (string) ( $_POST['policy_url'] ?? '' ) ) ),
+				] );
+				break;
+
+			case 'certification':
+				$current  = (array) $repo->get( 'certification', [] );
+				$old_text = self::quiz_to_text( (array) ( $current['questions'] ?? [] ) );
+				$new_q    = self::parse_quiz_text( (string) wp_unslash( $_POST['questions'] ?? '' ) );
+				$new_text = self::quiz_to_text( $new_q );
+				// Bump the quiz version whenever the questions actually change so
+				// every partner is forced to re-certify against the new content.
+				$version  = (int) ( $current['quiz_version'] ?? 1 );
+				if ( $new_text !== $old_text ) {
+					$version++;
+				}
+				$gate = sanitize_key( (string) ( $_POST['gate_mode'] ?? 'links' ) );
+				if ( ! in_array( $gate, [ 'none', 'links', 'portal' ], true ) ) {
+					$gate = 'links';
+				}
+				$repo->save_section( 'certification', [
+					'enabled'             => ! empty( $_POST['cert_enabled'] ),
+					'gate_mode'           => $gate,
+					'pass_pct'            => max( 0, min( 100, (int) ( $_POST['pass_pct'] ?? 80 ) ) ),
+					'require_signature'   => ! empty( $_POST['require_signature'] ),
+					'quiz_version'        => $version,
+					'acknowledgment_html' => wp_kses_post( wp_unslash( (string) ( $_POST['acknowledgment_html'] ?? '' ) ) ),
+					'questions'           => $new_q,
 				] );
 				break;
 

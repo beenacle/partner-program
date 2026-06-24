@@ -27,7 +27,29 @@ final class RestController {
 		add_action( 'rest_api_init', [ $this, 'register_routes' ] );
 	}
 
+	/**
+	 * Public form nonce actions this endpoint is allowed to mint. Kept to an
+	 * explicit allowlist so the endpoint can't be used as a generic nonce
+	 * oracle for privileged actions.
+	 *
+	 * @var array<int, string>
+	 */
+	private const PUBLIC_NONCE_ACTIONS = [ 'partner_program_apply', 'pp_portal_login', 'pp_portal_certify' ];
+
 	public function register_routes(): void {
+		// Uncached, public: hands a freshly-minted nonce to forms that may be
+		// rendered from a stale full-page cache. See assets/js/forms.js.
+		register_rest_route( self::NAMESPACE, '/form-nonce', [
+			'methods'             => 'GET',
+			'callback'            => [ $this, 'form_nonce' ],
+			'permission_callback' => '__return_true',
+			'args'                => [
+				'action' => [
+					'type'     => 'string',
+					'required' => true,
+				],
+			],
+		] );
 		register_rest_route( self::NAMESPACE, '/me/stats', [
 			'methods'  => 'GET',
 			'callback' => [ $this, 'me_stats' ],
@@ -56,6 +78,23 @@ final class RestController {
 		return $aff && 'approved' === $aff['status'];
 	}
 
+	public function form_nonce( WP_REST_Request $req ): WP_REST_Response {
+		$action   = (string) $req->get_param( 'action' );
+		$response = new WP_REST_Response();
+		// The entire point of this route is a live nonce, so it must never be
+		// stored by a CDN, proxy, or browser cache.
+		$response->header( 'Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0' );
+
+		if ( ! in_array( $action, self::PUBLIC_NONCE_ACTIONS, true ) ) {
+			$response->set_status( 400 );
+			$response->set_data( [ 'error' => 'invalid_action' ] );
+			return $response;
+		}
+
+		$response->set_data( [ 'nonce' => wp_create_nonce( $action ) ] );
+		return $response;
+	}
+
 	public function me_stats(): WP_REST_Response {
 		$aff = AffiliateRepo::find_by_user( get_current_user_id() );
 		$id  = (int) $aff['id'];
@@ -71,6 +110,15 @@ final class RestController {
 		$aff = AffiliateRepo::find_by_user( get_current_user_id() );
 		if ( ! $aff ) {
 			return new WP_Error( 'no_affiliate', 'No affiliate', [ 'status' => 404 ] );
+		}
+		// Mirror the portal Links-tab lock: don't let the AJAX link builder
+		// mint referral links for a partner who hasn't certified yet.
+		if ( \PartnerProgram\Domain\CertificationRepo::links_locked( (int) $aff['id'] ) ) {
+			return new WP_Error(
+				'not_certified',
+				__( 'Complete your compliance certification to use referral links.', 'partner-program' ),
+				[ 'status' => 403 ]
+			);
 		}
 		$raw = (string) $req->get_param( 'url' );
 		$url = $raw && self::is_same_host( $raw ) ? esc_url_raw( $raw ) : home_url( '/' );

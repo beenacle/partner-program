@@ -21,6 +21,8 @@ final class AdminMenu {
 
 		// CPT for marketing materials.
 		add_action( 'init', [ $this, 'register_material_cpt' ] );
+		// CPT for portal training modules.
+		add_action( 'init', [ $this, 'register_module_cpt' ] );
 	}
 
 	public function enqueue( string $hook ): void {
@@ -50,6 +52,7 @@ final class AdminMenu {
 		add_submenu_page( 'partner-program', __( 'Commissions', 'partner-program' ), __( 'Commissions', 'partner-program' ), $cap, 'partner-program-commissions', [ CommissionsScreen::class, 'render' ] );
 		add_submenu_page( 'partner-program', __( 'Payouts', 'partner-program' ), __( 'Payouts', 'partner-program' ), $cap, 'partner-program-payouts', [ PayoutsScreen::class, 'render' ] );
 		add_submenu_page( 'partner-program', __( 'Materials', 'partner-program' ), __( 'Materials', 'partner-program' ), $cap, 'edit.php?post_type=pp_material' );
+		add_submenu_page( 'partner-program', __( 'Training Modules', 'partner-program' ), __( 'Training Modules', 'partner-program' ), $cap, 'edit.php?post_type=pp_module' );
 		add_submenu_page( 'partner-program', __( 'Compliance', 'partner-program' ), __( 'Compliance', 'partner-program' ), $cap, 'partner-program-compliance', [ ComplianceScreen::class, 'render' ] );
 		add_submenu_page( 'partner-program', __( 'Settings', 'partner-program' ), __( 'Settings', 'partner-program' ), $cap, 'partner-program-settings', [ Settings::class, 'render_page' ] );
 		add_submenu_page( 'partner-program', __( 'Logs', 'partner-program' ), __( 'Logs', 'partner-program' ), $cap, 'partner-program-logs', [ LogsScreen::class, 'render' ] );
@@ -84,6 +87,35 @@ final class AdminMenu {
 				'map_meta_cap'       => true,
 				'supports'           => [ 'title', 'editor', 'excerpt', 'thumbnail', 'custom-fields' ],
 				'menu_icon'          => 'dashicons-megaphone',
+			]
+		);
+	}
+
+	public function register_module_cpt(): void {
+		register_post_type(
+			'pp_module',
+			[
+				'labels'             => [
+					'name'          => __( 'Training Modules', 'partner-program' ),
+					'singular_name' => __( 'Training Module', 'partner-program' ),
+					'add_new_item'  => __( 'Add new module', 'partner-program' ),
+					'edit_item'     => __( 'Edit module', 'partner-program' ),
+				],
+				'public'             => false,
+				'show_ui'            => true,
+				'show_in_menu'       => false,
+				// Off so core doesn't expose published training modules at
+				// /wp/v2/pp_module to anonymous readers — this content is meant
+				// to live behind the gated portal. Uses the classic editor.
+				'show_in_rest'       => false,
+				// Dedicated capability_type so partners only ever get read
+				// access to training content; matches the pp_material pattern.
+				'capability_type'    => [ 'pp_module', 'pp_modules' ],
+				'map_meta_cap'       => true,
+				// page-attributes adds the menu_order box so merchants can
+				// sequence Module 1, Module 2, ... in the portal.
+				'supports'           => [ 'title', 'editor', 'excerpt', 'page-attributes' ],
+				'menu_icon'          => 'dashicons-welcome-learn-more',
 			]
 		);
 	}

@@ -44,6 +44,31 @@ final class Capabilities {
 		];
 	}
 
+	/**
+	 * Primitive caps for the pp_module (training) CPT, mirroring
+	 * material_admin_caps(). Granted to the administrator; the partner role
+	 * only gets read access.
+	 *
+	 * @return array<int, string>
+	 */
+	public static function module_admin_caps(): array {
+		return [
+			'edit_pp_module',
+			'read_pp_module',
+			'delete_pp_module',
+			'edit_pp_modules',
+			'edit_others_pp_modules',
+			'publish_pp_modules',
+			'read_private_pp_modules',
+			'delete_pp_modules',
+			'delete_private_pp_modules',
+			'delete_published_pp_modules',
+			'delete_others_pp_modules',
+			'edit_private_pp_modules',
+			'edit_published_pp_modules',
+		];
+	}
+
 	public static function register_role(): void {
 		if ( ! get_role( self::ROLE_PARTNER ) ) {
 			add_role(
@@ -53,6 +78,7 @@ final class Capabilities {
 					'read'                       => true,
 					self::CAP_PORTAL             => true,
 					'read_pp_material'           => true,
+					'read_pp_module'             => true,
 				]
 			);
 		} else {
@@ -60,6 +86,7 @@ final class Capabilities {
 			$role->add_cap( 'read' );
 			$role->add_cap( self::CAP_PORTAL );
 			$role->add_cap( 'read_pp_material' );
+			$role->add_cap( 'read_pp_module' );
 		}
 	}
 
@@ -69,6 +96,9 @@ final class Capabilities {
 			$admin->add_cap( self::CAP_MANAGE );
 			$admin->add_cap( self::CAP_PORTAL );
 			foreach ( self::material_admin_caps() as $cap ) {
+				$admin->add_cap( $cap );
+			}
+			foreach ( self::module_admin_caps() as $cap ) {
 				$admin->add_cap( $cap );
 			}
 		}

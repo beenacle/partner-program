@@ -1,6 +1,23 @@
 <?php
-/** @var string $coupon_code @var string $ref_link @var bool $coupon_exists */
+/**
+ * @var string $coupon_code
+ * @var string $ref_link
+ * @var bool   $coupon_exists
+ * @var bool   $gate_active   Certification gate is on and partner isn't certified.
+ * @var string $training_url
+ */
 defined( 'ABSPATH' ) || exit;
+
+if ( ! empty( $gate_active ) ) :
+	?>
+	<div class="pp-locked">
+		<h3><?php esc_html_e( 'Your links are locked', 'partner-program' ); ?></h3>
+		<p><?php esc_html_e( 'Complete your compliance certification to unlock your referral link and coupon code and start earning commissions.', 'partner-program' ); ?></p>
+		<p><a class="pp-btn pp-btn-primary" href="<?php echo esc_url( $training_url ); ?>"><?php esc_html_e( 'Go to Training & Certification', 'partner-program' ); ?></a></p>
+	</div>
+	<?php
+	return;
+endif;
 ?>
 <h3><?php esc_html_e( 'Your referral link', 'partner-program' ); ?></h3>
 <div class="pp-copy">

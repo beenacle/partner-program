@@ -158,6 +158,21 @@ final class Installer {
 			KEY agreement_id (agreement_id)
 		) {$charset_collate};";
 
+		$tables[] = "CREATE TABLE {$prefix}certifications (
+			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+			affiliate_id BIGINT UNSIGNED NOT NULL,
+			quiz_version BIGINT UNSIGNED NOT NULL DEFAULT 1,
+			score_pct DECIMAL(5,2) NOT NULL DEFAULT 0,
+			passed TINYINT(1) NOT NULL DEFAULT 0,
+			signature VARCHAR(190) NULL,
+			ip_hash VARCHAR(64) NULL,
+			answers LONGTEXT NULL,
+			created_at DATETIME NOT NULL,
+			PRIMARY KEY  (id),
+			KEY affiliate_id (affiliate_id),
+			KEY passed (passed)
+		) {$charset_collate};";
+
 		$tables[] = "CREATE TABLE {$prefix}logs (
 			id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
 			level VARCHAR(20) NOT NULL DEFAULT 'info',

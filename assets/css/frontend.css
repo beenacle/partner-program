@@ -5,3 +5,6 @@
 
 .pp-application { max-width: 720px; margin: 0 auto; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
 .pp-application h2 { margin-bottom: 1rem; }
+.pp-compliance-notice { background: #f9fafb; border: 1px solid #e5e7eb; border-left: 3px solid var(--pp-accent); border-radius: 8px; padding: .75rem 1rem; margin-bottom: 1.25rem; font-size: .95em; color: #374151; }
+.pp-compliance-notice p { margin: 0 0 .5rem; }
+.pp-compliance-notice .pp-policy-link { margin: 0; }

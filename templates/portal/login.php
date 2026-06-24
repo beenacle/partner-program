@@ -9,9 +9,17 @@ defined( 'ABSPATH' ) || exit;
 <div class="pp-login">
 	<h2><?php esc_html_e( 'Partner login', 'partner-program' ); ?></h2>
 	<?php if ( $error ) : ?>
-		<div class="pp-alert pp-alert-error"><?php esc_html_e( 'Invalid credentials.', 'partner-program' ); ?></div>
+		<div class="pp-alert pp-alert-error">
+			<?php
+			if ( 'expired' === $error ) {
+				esc_html_e( 'Your session expired. Please log in again.', 'partner-program' );
+			} else {
+				esc_html_e( 'Invalid credentials.', 'partner-program' );
+			}
+			?>
+		</div>
 	<?php endif; ?>
-	<form method="post" action="<?php echo esc_url( $action ); ?>" class="pp-form">
+	<form method="post" action="<?php echo esc_url( $action ); ?>" class="pp-form" data-pp-refresh-nonce data-pp-nonce-action="pp_portal_login" data-pp-nonce-field="_pp_login_nonce">
 		<input type="hidden" name="action" value="pp_portal_login" />
 		<?php echo $nonce; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 		<div class="pp-field"><label><?php esc_html_e( 'Username or email', 'partner-program' ); ?><input type="text" name="log" required /></label></div>

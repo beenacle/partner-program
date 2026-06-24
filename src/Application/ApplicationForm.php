@@ -10,6 +10,7 @@ declare( strict_types = 1 );
 namespace PartnerProgram\Application;
 
 use PartnerProgram\Domain\ApplicationRepo;
+use PartnerProgram\Rest\RestController;
 use PartnerProgram\Support\SettingsRepo;
 use PartnerProgram\Support\Template;
 use PartnerProgram\Tracking\Tracker;
@@ -34,10 +35,17 @@ final class ApplicationForm {
 		// an archive widget, a block-template part, or a REST-rendered page.
 		wp_register_style( 'partner-program-components', PARTNER_PROGRAM_URL . 'assets/css/components.css', [], PARTNER_PROGRAM_VERSION );
 		wp_register_style( 'partner-program-frontend', PARTNER_PROGRAM_URL . 'assets/css/frontend.css', [ 'partner-program-components' ], PARTNER_PROGRAM_VERSION );
+		wp_register_script( 'partner-program-forms', PARTNER_PROGRAM_URL . 'assets/js/forms.js', [], PARTNER_PROGRAM_VERSION, true );
 	}
 
 	public function render_shortcode( $atts = [] ): string {
 		wp_enqueue_style( 'partner-program-frontend' );
+		wp_enqueue_script( 'partner-program-forms' );
+		wp_localize_script(
+			'partner-program-forms',
+			'partnerProgramForms',
+			[ 'restUrl' => rest_url( RestController::NAMESPACE . '/form-nonce' ) ]
+		);
 		$settings = new SettingsRepo();
 		$fields   = (array) $settings->get( 'application.fields', [] );
 		$fields   = apply_filters( 'partner_program_application_fields', $fields );
@@ -47,11 +55,13 @@ final class ApplicationForm {
 		$html = Template::render(
 			'application/form.php',
 			[
-				'fields'   => $fields,
-				'settings' => $settings,
-				'flash'    => $flash,
-				'action'   => esc_url( admin_url( 'admin-post.php' ) ),
-				'nonce'    => wp_nonce_field( self::NONCE_ACTION, self::NONCE_FIELD, true, false ),
+				'fields'     => $fields,
+				'settings'   => $settings,
+				'flash'      => $flash,
+				'intro_html' => (string) $settings->get( 'application.intro_html', '' ),
+				'policy_url' => (string) $settings->get( 'application.policy_url', '' ),
+				'action'     => esc_url( admin_url( 'admin-post.php' ) ),
+				'nonce'      => wp_nonce_field( self::NONCE_ACTION, self::NONCE_FIELD, true, false ),
 			]
 		);
 
@@ -66,7 +76,20 @@ final class ApplicationForm {
 	}
 
 	public function handle_submission(): void {
-		check_admin_referer( self::NONCE_ACTION, self::NONCE_FIELD );
+		$nonce = isset( $_POST[ self::NONCE_FIELD ] ) ? sanitize_text_field( wp_unslash( (string) $_POST[ self::NONCE_FIELD ] ) ) : '';
+		if ( ! wp_verify_nonce( $nonce, self::NONCE_ACTION ) ) {
+			// A public page can sit in a full-page cache (Kinsta, Varnish,
+			// Cloudflare) long enough for the embedded nonce to expire. Rather
+			// than hard-die with WordPress's "Are you sure you want to do
+			// this?" screen — which silently loses the application — tell the
+			// applicant their session expired so they can resubmit.
+			// assets/js/forms.js refreshes the nonce client-side; this is the
+			// no-JS / fetch-failed fallback.
+			$this->redirect_back(
+				__( 'Your session expired before the form was submitted. Please review your details and submit again.', 'partner-program' ),
+				'error'
+			);
+		}
 
 		$settings = new SettingsRepo();
 		$fields   = (array) $settings->get( 'application.fields', [] );
