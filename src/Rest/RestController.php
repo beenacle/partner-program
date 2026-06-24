@@ -34,7 +34,7 @@ final class RestController {
 	 *
 	 * @var array<int, string>
 	 */
-	private const PUBLIC_NONCE_ACTIONS = [ 'partner_program_apply', 'pp_portal_login', 'pp_portal_certify' ];
+	private const PUBLIC_NONCE_ACTIONS = [ 'partner_program_apply', 'pp_portal_login' ];
 
 	public function register_routes(): void {
 		// Uncached, public: hands a freshly-minted nonce to forms that may be

@@ -4,7 +4,7 @@ Tags: affiliate, partner, woocommerce, referral, commission
 Requires at least: 6.2
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.5.1
+Stable tag: 1.5.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -52,6 +52,9 @@ If both refer to the same affiliate, the source is recorded as `both` and the co
 Generate a payout batch from *Partner Program → Payouts*. Download the CSV, send funds via your preferred method (ACH, PayPal, Zelle, CashApp, Wise, check), then click "Mark paid" so commissions roll to status `paid`.
 
 == Changelog ==
+
+= 1.5.2 =
+* Fix: the certification quiz could fail with "Your session expired before the quiz was submitted." The logged-in portal form was wrongly using the cached-page nonce refresh built for the logged-out application/login pages, which replaced its valid nonce with one minted in an anonymous context. The portal is never full-page-cached, so its nonce is always fresh — removed the client-side refresh from the certify form.
 
 = 1.5.1 =
 QA hardening pass (money/payout/security fixes):

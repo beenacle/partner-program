@@ -73,12 +73,11 @@ final class Portal {
 	public function render_portal(): string {
 		wp_enqueue_style( 'partner-program-portal' );
 		wp_enqueue_script( 'partner-program-portal' );
-		wp_enqueue_script( 'partner-program-forms' );
-		wp_localize_script(
-			'partner-program-forms',
-			'partnerProgramForms',
-			[ 'restUrl' => rest_url( RestController::NAMESPACE . '/form-nonce' ) ]
-		);
+		// NOTE: the portal is logged-in and never full-page-cached, so the
+		// certify form's nonce is always fresh — it must NOT use the
+		// forms.js client refresh (that fetches an anonymous-context nonce
+		// which fails verification on submit). forms.js is only for the
+		// cached, logged-out application/login pages.
 		wp_localize_script(
 			'partner-program-portal',
 			'partnerProgramPortal',

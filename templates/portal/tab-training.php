@@ -57,7 +57,7 @@ $ack_html    = str_replace( '{program_name}', esc_html( $program ), $ack_html );
 	<?php else : ?>
 		<p><?php echo esc_html( sprintf( __( 'Answer the questions below and score at least %d%% to certify. Your answers, signature, and timestamp are recorded as your training record.', 'partner-program' ), $pass_pct ) ); ?></p>
 
-		<form method="post" action="<?php echo esc_url( $certify_action ); ?>" class="pp-form pp-quiz" data-pp-refresh-nonce data-pp-nonce-action="pp_portal_certify" data-pp-nonce-field="_pp_certify_nonce">
+		<form method="post" action="<?php echo esc_url( $certify_action ); ?>" class="pp-form pp-quiz">
 			<input type="hidden" name="action" value="pp_portal_certify" />
 			<?php echo $certify_nonce; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?>
 
