@@ -25,7 +25,6 @@ use PartnerProgram\Support\Capabilities;
 use PartnerProgram\Support\Encryption;
 use PartnerProgram\Support\Logger;
 use PartnerProgram\Support\Privacy;
-use PartnerProgram\Support\Updater;
 use PartnerProgram\Tracking\Tracker;
 use PartnerProgram\Woo\OrderHooks;
 use PartnerProgram\Woo\CouponManager;
@@ -68,9 +67,10 @@ final class Plugin {
 
 		Privacy::register();
 
-		// Updater also runs on cron-driven update checks (wp_update_plugins),
-		// so we register it on every request, not just admin pageloads.
-		Updater::register();
+		// GitHub-Releases self-updater (shared across beenacle plugins). Runs on
+		// cron-driven update checks too, so register on every request.
+		require_once PARTNER_PROGRAM_DIR . 'includes/GitHubUpdater.php';
+		( new \Beenacle\PartnerProgram\GitHubUpdater( PARTNER_PROGRAM_FILE, 'beenacle', 'partner-program' ) )->register();
 
 		if ( defined( 'WP_CLI' ) && \WP_CLI ) {
 			Commands::register();
