@@ -23,6 +23,57 @@ final class PayoutManager {
 	public function register(): void {}
 
 	/**
+	 * Daily wp-cron entry point: honour the "Schedule" / "Payout day" settings,
+	 * which were previously inert (batches only ran on a manual admin click).
+	 *
+	 * Exactly one batch per period, ever: we persist the last generated period
+	 * key and bail if it already matches, so a daily tick that fires twice in a
+	 * day (re-scheduled event, DST, manual cron) cannot double-generate, while a
+	 * missed due-day tick is still caught up on a later day in the same period.
+	 * Dates use the site timezone (wp_date) to match the configured payout day.
+	 */
+	public static function run_scheduled_generation(): void {
+		$settings = new SettingsRepo();
+		$schedule = (string) $settings->get( 'hold_payouts.schedule', 'monthly' );
+		if ( 'manual' === $schedule ) {
+			return;
+		}
+
+		$label_start = null;
+		$label_end   = null;
+		if ( 'weekly' === $schedule ) {
+			$period      = (string) wp_date( 'o-\WW' );                 // ISO year-week, e.g. 2026-W26.
+			$due         = true;                                        // First tick of a new ISO week.
+			$label_start = (string) wp_date( 'Y-m-d', strtotime( '-7 days' ) ); // Label the batch with the week it covers,
+			$label_end   = (string) wp_date( 'Y-m-d' );                 // not last month (generate_batch's default).
+		} else { // monthly (default).
+			$day    = max( 1, min( 28, (int) $settings->get( 'hold_payouts.payout_day', 1 ) ) );
+			$period = (string) wp_date( 'Y-m' );   // e.g. 2026-06.
+			$due    = ( (int) wp_date( 'j' ) >= $day ); // On/after the configured day (catch-up safe).
+		}
+
+		$key           = $schedule . ':' . $period;
+		$last          = (string) get_option( 'partner_program_last_payout_period', '' );
+		$last_schedule = '' !== $last ? (string) strstr( $last, ':', true ) : '';
+
+		// First ever run, or the schedule changed since the last batch: arm for
+		// the new schedule's next period instead of (a) retro-generating a batch
+		// the moment the plugin is deployed past a due day, or (b) emitting an
+		// extra batch right after an admin switches monthly<->weekly mid-period.
+		if ( '' === $last || $last_schedule !== $schedule ) {
+			update_option( 'partner_program_last_payout_period', $key, false );
+			return;
+		}
+
+		if ( $last === $key || ! $due ) {
+			return; // Already generated this period, or not yet due.
+		}
+
+		self::generate_batch( null, $label_start, $label_end );
+		update_option( 'partner_program_last_payout_period', $key, false );
+	}
+
+	/**
 	 * Generate one queued payout per affiliate whose approved-and-unpaid total ≥ threshold.
 	 *
 	 * Concurrency model:
@@ -40,9 +91,14 @@ final class PayoutManager {
 	 *      at half-claimed commissions.
 	 *
 	 * @param string|null $period_yyyymm e.g. "2026-04". Null = use prior month.
+	 * @param string|null $label_start   Y-m-d override for the batch's period_start
+	 *                                   label on the unscoped path (claim is still
+	 *                                   all approved+unclaimed). Used by the weekly
+	 *                                   cron so batches aren't labeled "last month".
+	 * @param string|null $label_end     Y-m-d override for period_end (unscoped path).
 	 * @return array{count:int, batch_id:string}
 	 */
-	public static function generate_batch( ?string $period_yyyymm = null ): array {
+	public static function generate_batch( ?string $period_yyyymm = null, ?string $label_start = null, ?string $label_end = null ): array {
 		global $wpdb;
 		$settings  = new SettingsRepo();
 		$threshold = Money::to_cents( (float) $settings->get( 'hold_payouts.min_threshold', 100 ) );
@@ -58,8 +114,11 @@ final class PayoutManager {
 			$start = sprintf( '%04d-%02d-01', (int) $m[1], (int) $m[2] );
 			$end   = gmdate( 'Y-m-01', strtotime( $start . ' +1 month' ) );
 		} else {
-			$start = gmdate( 'Y-m-01', strtotime( '-1 month' ) );
-			$end   = gmdate( 'Y-m-01' );
+			// Unscoped claim (every approved + unclaimed commission). Labels
+			// default to the prior month, but a caller may override them (the
+			// weekly cron labels the batch with the week it just closed).
+			$start = $label_start ?: gmdate( 'Y-m-01', strtotime( '-1 month' ) );
+			$end   = $label_end ?: gmdate( 'Y-m-01' );
 		}
 
 		$lock_name = 'pp_generate_batch';

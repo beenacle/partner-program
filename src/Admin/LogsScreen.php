@@ -9,6 +9,7 @@ declare( strict_types = 1 );
 
 namespace PartnerProgram\Admin;
 
+use PartnerProgram\Admin\Tables\LogsTable;
 use PartnerProgram\Support\Capabilities;
 use PartnerProgram\Support\Logger;
 use PartnerProgram\Support\SettingsRepo;
@@ -19,6 +20,22 @@ final class LogsScreen {
 
 	public const NONCE_ACTION = 'pp_logs_prune';
 
+	/**
+	 * Registered on the screen's load hook (see AdminMenu) so the per-page and
+	 * column-visibility Screen Options panel works natively.
+	 */
+	public static function configure_screen_options(): void {
+		add_screen_option(
+			'per_page',
+			[
+				'label'   => __( 'Logs per page', 'partner-program' ),
+				'default' => 100,
+				'option'  => 'pp_logs_per_page',
+			]
+		);
+		( new LogsTable() )->register_screen_columns();
+	}
+
 	public static function render(): void {
 		if ( ! current_user_can( Capabilities::CAP_MANAGE ) ) {
 			return;
@@ -26,11 +43,8 @@ final class LogsScreen {
 
 		self::handle_prune();
 
-		global $wpdb;
-		$table = $wpdb->prefix . 'pp_logs';
-
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
-		$rows = $wpdb->get_results( "SELECT * FROM {$table} ORDER BY id DESC LIMIT 200", ARRAY_A );
+		$list = new LogsTable();
+		$list->prepare_items();
 
 		$repo      = new SettingsRepo();
 		$retention = (int) $repo->get( 'logs.retention_days', 90 );
@@ -80,26 +94,8 @@ final class LogsScreen {
 			. '</button>';
 		echo '</form>';
 
-		echo '<table class="wp-list-table widefat fixed striped"><thead><tr>'
-			. '<th>' . esc_html__( 'ID', 'partner-program' ) . '</th><th>' . esc_html__( 'When', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Channel', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Level', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Message', 'partner-program' ) . '</th>'
-			. '</tr></thead><tbody>';
-		foreach ( $rows as $r ) {
-			printf(
-				'<tr><td>#%1$d</td><td>%2$s</td><td>%3$s</td><td>%4$s</td><td>%5$s</td></tr>',
-				(int) $r['id'],
-				esc_html( (string) $r['created_at'] ),
-				esc_html( (string) $r['channel'] ),
-				esc_html( (string) $r['level'] ),
-				esc_html( (string) $r['message'] )
-			);
-		}
-		if ( ! $rows ) {
-			echo '<tr><td colspan="5">' . esc_html__( 'No logs.', 'partner-program' ) . '</td></tr>';
-		}
-		echo '</tbody></table></div>';
+		$list->display();
+		echo '</div>';
 	}
 
 	private static function handle_prune(): void {

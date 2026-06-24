@@ -9,15 +9,29 @@ declare( strict_types = 1 );
 
 namespace PartnerProgram\Admin;
 
-use PartnerProgram\Domain\AffiliateRepo;
-use PartnerProgram\Domain\PayoutRepo;
+use PartnerProgram\Admin\Tables\PayoutsTable;
 use PartnerProgram\Payouts\PayoutManager;
 use PartnerProgram\Support\Capabilities;
-use PartnerProgram\Support\Money;
 
 defined( 'ABSPATH' ) || exit;
 
 final class PayoutsScreen {
+
+	/**
+	 * Registered on the screen's load hook (see AdminMenu) so the per-page and
+	 * column-visibility Screen Options panel works natively.
+	 */
+	public static function configure_screen_options(): void {
+		add_screen_option(
+			'per_page',
+			[
+				'label'   => __( 'Payouts per page', 'partner-program' ),
+				'default' => 100,
+				'option'  => 'pp_payouts_per_page',
+			]
+		);
+		( new PayoutsTable() )->register_screen_columns();
+	}
 
 	public static function render(): void {
 		if ( ! current_user_can( Capabilities::CAP_MANAGE ) ) {
@@ -26,13 +40,8 @@ final class PayoutsScreen {
 
 		self::handle_actions();
 
-		$page        = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$per_page    = 100;
-		$total_items = PayoutRepo::count();
-		$total_pages = max( 1, (int) ceil( $total_items / $per_page ) );
-		$rows        = PayoutRepo::search( [ 'per_page' => $per_page, 'page' => $page ] );
-		$affiliates = AffiliateRepo::find_many( array_map( static fn ( $r ): int => (int) $r['affiliate_id'], $rows ) );
-		cache_users( array_values( array_filter( array_map( static fn ( $a ): int => (int) ( $a['user_id'] ?? 0 ), $affiliates ) ) ) );
+		$list = new PayoutsTable();
+		$list->prepare_items();
 
 		echo '<div class="wrap"><h1>' . esc_html__( 'Payouts', 'partner-program' ) . '</h1>';
 
@@ -58,77 +67,12 @@ final class PayoutsScreen {
 		echo get_submit_button( __( 'Generate payout batch', 'partner-program' ), 'primary', 'submit', false );
 		echo '</form>';
 
-		echo '<table class="wp-list-table widefat fixed striped"><thead><tr>'
-			. '<th>' . esc_html__( 'ID', 'partner-program' ) . '</th><th>' . esc_html__( 'Affiliate', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Period', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Method', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Amount', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Status', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Reference', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Actions', 'partner-program' ) . '</th>'
-			. '</tr></thead><tbody>';
+		$list->display();
 
-		$batches = [];
-		foreach ( $rows as $row ) {
-			$aff  = $affiliates[ (int) $row['affiliate_id'] ] ?? null;
-			$user = $aff ? get_userdata( (int) $aff['user_id'] ) : null;
-			echo '<tr>';
-			echo '<td>#' . (int) $row['id'] . '</td>';
-			echo '<td>' . esc_html( $user ? $user->user_email : '#' . $row['affiliate_id'] ) . '</td>';
-			echo '<td>' . esc_html( ( $row['period_start'] ?? '' ) . ' / ' . ( $row['period_end'] ?? '' ) ) . '</td>';
-			echo '<td>' . esc_html( (string) $row['method'] ) . '</td>';
-			echo '<td>' . esc_html( Money::format( (int) $row['total_amount_cents'], (string) $row['currency'] ) ) . '</td>';
-			$status_labels = [
-					'queued'   => __( 'Queued', 'partner-program' ),
-					'paid'     => __( 'Paid', 'partner-program' ),
-					'reverted' => __( 'Reverted', 'partner-program' ),
-					'failed'   => __( 'Failed', 'partner-program' ),
-				];
-				$status_label = $status_labels[ (string) $row['status'] ] ?? ucfirst( (string) $row['status'] );
-				echo '<td>' . esc_html( $status_label ) . '</td>';
-			echo '<td>' . esc_html( (string) $row['reference'] ) . '</td>';
-			echo '<td>';
-			if ( 'queued' === $row['status'] ) {
-				$mark_paid_url = wp_nonce_url(
-					add_query_arg( [ 'pp_action' => 'mark_paid', 'id' => (int) $row['id'] ], admin_url( 'admin.php?page=partner-program-payouts' ) ),
-					'pp_payout_action_' . $row['id']
-				);
-				echo '<a href="' . esc_url( $mark_paid_url ) . '">' . esc_html__( 'Mark paid', 'partner-program' ) . '</a> | ';
-				$revert_url = wp_nonce_url(
-					add_query_arg( [ 'pp_action' => 'revert', 'id' => (int) $row['id'] ], admin_url( 'admin.php?page=partner-program-payouts' ) ),
-					'pp_payout_action_' . $row['id']
-				);
-				echo '<a href="' . esc_url( $revert_url ) . '">' . esc_html__( 'Revert', 'partner-program' ) . '</a>';
-			}
-			echo '</td></tr>';
-
-			if ( $row['csv_batch_id'] ) {
-				$batches[ $row['csv_batch_id'] ] = true;
-			}
-		}
-		if ( ! $rows ) {
-			echo '<tr><td colspan="8">' . esc_html__( 'No payouts yet.', 'partner-program' ) . '</td></tr>';
-		}
-		echo '</tbody></table>';
-
-		if ( $total_pages > 1 ) {
-			echo '<div class="tablenav bottom"><div class="tablenav-pages">';
-			echo paginate_links( // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-				[
-					'base'      => add_query_arg( 'paged', '%#%' ),
-					'format'    => '',
-					'total'     => $total_pages,
-					'current'   => $page,
-					'prev_text' => '&laquo;',
-					'next_text' => '&raquo;',
-				]
-			);
-			echo '</div></div>';
-		}
-
+		$batches = $list->get_batch_ids();
 		if ( $batches ) {
 			echo '<h2>' . esc_html__( 'CSV exports', 'partner-program' ) . '</h2><ul>';
-			foreach ( array_keys( $batches ) as $batch ) {
+			foreach ( $batches as $batch ) {
 				$url = wp_nonce_url(
 					add_query_arg( [ 'pp_action' => 'export_csv', 'batch' => (string) $batch ], admin_url( 'admin.php?page=partner-program-payouts' ) ),
 					'pp_payout_export_' . $batch

@@ -9,6 +9,7 @@ declare( strict_types = 1 );
 
 namespace PartnerProgram\Admin;
 
+use PartnerProgram\Admin\Tables\AffiliatesTable;
 use PartnerProgram\Domain\AffiliateRepo;
 use PartnerProgram\Domain\AgreementRepo;
 use PartnerProgram\Domain\CommissionRepo;
@@ -32,6 +33,22 @@ final class AffiliatesScreen {
 	public static function register(): void {
 		add_action( 'wp_ajax_pp_affiliate_user_search', [ self::class, 'ajax_user_search' ] );
 		add_action( 'admin_enqueue_scripts', [ self::class, 'enqueue_assets' ] );
+	}
+
+	/**
+	 * Registered on the screen's load hook (see AdminMenu) so the per-page and
+	 * column-visibility Screen Options panel works natively on the list view.
+	 */
+	public static function configure_screen_options(): void {
+		add_screen_option(
+			'per_page',
+			[
+				'label'   => __( 'Affiliates per page', 'partner-program' ),
+				'default' => 50,
+				'option'  => 'pp_affiliates_per_page',
+			]
+		);
+		( new AffiliatesTable() )->register_screen_columns();
 	}
 
 	public static function enqueue_assets( string $hook ): void {
@@ -169,14 +186,8 @@ final class AffiliatesScreen {
 	}
 
 	private static function render_list(): void {
-		$status = isset( $_GET['status'] ) ? sanitize_key( (string) $_GET['status'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$search = isset( $_GET['s'] ) ? sanitize_text_field( wp_unslash( (string) $_GET['s'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$page   = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-
-		$per_page    = 50;
-		$total_items = AffiliateRepo::count( [ 'status' => $status, 'search' => $search ] );
-		$total_pages = max( 1, (int) ceil( $total_items / $per_page ) );
-		$rows        = AffiliateRepo::search( [ 'status' => $status, 'search' => $search, 'page' => $page, 'per_page' => $per_page ] );
+		$list = new AffiliatesTable();
+		$list->prepare_items();
 
 		echo '<div class="wrap"><h1 class="wp-heading-inline">' . esc_html__( 'Affiliates', 'partner-program' ) . '</h1> ';
 		printf(
@@ -192,109 +203,20 @@ final class AffiliatesScreen {
 			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Affiliate created.', 'partner-program' ) . '</p></div>';
 		}
 
-		Ui::status_filter(
-			'partner-program-affiliates',
-			$status,
-			[
-				''          => __( 'All statuses', 'partner-program' ),
-				'pending'   => __( 'Pending', 'partner-program' ),
-				'approved'  => __( 'Approved', 'partner-program' ),
-				'suspended' => __( 'Suspended', 'partner-program' ),
-				'rejected'  => __( 'Rejected', 'partner-program' ),
-			],
-			[
-				'name'        => 's',
-				'value'       => $search,
-				'placeholder' => __( 'Search by code or email', 'partner-program' ),
-			]
-		);
+		// Status filter as native list-table views above the table.
+		$list->views();
 
-		echo '<table class="wp-list-table widefat fixed striped"><thead><tr>'
-			. '<th>' . esc_html__( 'ID', 'partner-program' ) . '</th><th>' . esc_html__( 'User', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Code', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Status', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Tier', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Rate', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Pending', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Approved', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Paid', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Actions', 'partner-program' ) . '</th>'
-			. '</tr></thead><tbody>';
-
-		// One grouped query for the whole page instead of N×3 (pending /
-		// approved / paid) round-trips.
-		$ids  = array_map( static fn ( array $r ): int => (int) $r['id'], $rows );
-		$sums = CommissionRepo::sums_for_affiliates( $ids );
-
-		foreach ( $rows as $row ) {
-			$user      = get_userdata( (int) $row['user_id'] );
-			$totals    = $sums[ (int) $row['id'] ] ?? [ 'pending' => 0, 'approved' => 0, 'paid' => 0 ];
-			$pending   = $totals['pending'];
-			$approved  = $totals['approved'];
-			$paid      = $totals['paid'];
-
-			echo '<tr>';
-			echo '<td>#' . (int) $row['id'] . '</td>';
-			echo '<td>' . esc_html( $user ? $user->user_email : '—' ) . '</td>';
-			echo '<td><code>' . esc_html( (string) $row['referral_code'] ) . '</code></td>';
-			echo '<td>' . esc_html( (string) $row['status'] ) . '</td>';
-			$tier_key   = isset( $row['current_tier_key'] ) ? (string) $row['current_tier_key'] : '';
-			$tier_label = '—';
-			if ( '' !== $tier_key ) {
-				$tier       = TierResolver::tier_for_key( $tier_key );
-				$tier_label = $tier && ! empty( $tier['label'] ) ? (string) $tier['label'] : $tier_key;
-			}
-			echo '<td>' . esc_html( $tier_label ) . '</td>';
-			echo '<td>' . esc_html( self::format_effective_rate( $row ) ) . '</td>';
-			echo '<td>' . esc_html( Money::format( $pending ) ) . '</td>';
-			echo '<td>' . esc_html( Money::format( $approved ) ) . '</td>';
-			echo '<td>' . esc_html( Money::format( $paid ) ) . '</td>';
-			echo '<td class="pp-row-actions">';
-			// Link back to this same screen rather than admin-post.php — we
-			// don't register an admin_post_pp_affiliate_* hook, the action
-			// is handled inline by handle_actions() during render().
-			$base = admin_url( 'admin.php?page=partner-program-affiliates' );
-			$mk   = static fn( string $action, string $label ) => sprintf(
-				'<a href="%s">%s</a>',
-				esc_url( wp_nonce_url(
-					add_query_arg( [ 'action' => 'pp_affiliate_' . $action, 'id' => (int) $row['id'] ], $base ),
-					'pp_affiliate_action_' . $row['id']
-				) ),
-				esc_html( $label )
-			);
-			printf(
-				'<a href="%s">%s</a> | ',
-				esc_url( add_query_arg( [ 'action' => 'edit', 'id' => (int) $row['id'] ], $base ) ),
-				esc_html__( 'Edit', 'partner-program' )
-			);
-			if ( 'approved' !== $row['status'] ) {
-				echo $mk( 'approve', __( 'Approve', 'partner-program' ) ) . ' | ';
-			}
-			if ( 'suspended' !== $row['status'] ) {
-				echo $mk( 'suspend', __( 'Suspend', 'partner-program' ) );
-			}
-			echo '</td>';
-			echo '</tr>';
+		// GET form so the search box + view links + pagination all round-trip
+		// back to this same admin page (?page=partner-program-affiliates).
+		echo '<form method="get">';
+		echo '<input type="hidden" name="page" value="partner-program-affiliates" />';
+		$status = isset( $_GET['status'] ) ? sanitize_key( (string) $_GET['status'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		if ( '' !== $status ) {
+			echo '<input type="hidden" name="status" value="' . esc_attr( $status ) . '" />';
 		}
-		if ( ! $rows ) {
-			echo '<tr><td colspan="10">' . esc_html__( 'No affiliates found.', 'partner-program' ) . '</td></tr>';
-		}
-		echo '</tbody></table>';
-
-		if ( $total_pages > 1 ) {
-			echo '<div class="tablenav bottom"><div class="tablenav-pages">';
-			echo paginate_links( // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-				[
-					'base'      => add_query_arg( 'paged', '%#%' ),
-					'format'    => '',
-					'total'     => $total_pages,
-					'current'   => $page,
-					'prev_text' => '&laquo;',
-					'next_text' => '&raquo;',
-				]
-			);
-			echo '</div></div>';
-		}
+		$list->search_box( __( 'Search by code or email', 'partner-program' ), 'pp-affiliate-search' );
+		$list->display();
+		echo '</form>';
 
 		echo '</div>';
 	}

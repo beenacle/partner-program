@@ -73,7 +73,8 @@ final class Installer {
 			created_at DATETIME NOT NULL,
 			PRIMARY KEY  (id),
 			KEY affiliate_id (affiliate_id),
-			KEY referral_code (referral_code)
+			KEY referral_code (referral_code),
+			KEY created_at (created_at)
 		) {$charset_collate};";
 
 		// order_id is NULLABLE because manual adjustments are not tied to an order.
@@ -102,7 +103,9 @@ final class Installer {
 			UNIQUE KEY uniq_order_id (order_id),
 			KEY status (status),
 			KEY hold_release_at (hold_release_at),
-			KEY payout_id (payout_id)
+			KEY payout_id (payout_id),
+			KEY aff_status_payout (affiliate_id, status, payout_id),
+			KEY aff_status_created (affiliate_id, status, created_at)
 		) {$charset_collate};";
 
 		$tables[] = "CREATE TABLE {$prefix}payouts (

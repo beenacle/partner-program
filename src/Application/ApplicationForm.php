@@ -9,6 +9,7 @@ declare( strict_types = 1 );
 
 namespace PartnerProgram\Application;
 
+use PartnerProgram\Domain\AffiliateRepo;
 use PartnerProgram\Domain\ApplicationRepo;
 use PartnerProgram\Rest\RestController;
 use PartnerProgram\Support\SettingsRepo;
@@ -40,6 +41,26 @@ final class ApplicationForm {
 
 	public function render_shortcode( $atts = [] ): string {
 		wp_enqueue_style( 'partner-program-frontend' );
+
+		// Don't show the form to someone who is already a partner or who has an
+		// application under review — mirror the login page's "you're logged in"
+		// behaviour so they can't (accidentally) file duplicates.
+		if ( is_user_logged_in() ) {
+			$affiliate = AffiliateRepo::find_by_user( get_current_user_id() );
+			if ( $affiliate && 'approved' === $affiliate['status'] ) {
+				$portal_id = (int) get_option( 'partner_program_portal_page_id' );
+				$portal_url = $portal_id ? get_permalink( $portal_id ) : home_url( '/partner-portal/' );
+				return '<div class="pp-application"><p>' . sprintf(
+					wp_kses_post( __( 'You are already a partner. <a href="%s">Go to your partner portal</a>.', 'partner-program' ) ),
+					esc_url( $portal_url )
+				) . '</p></div>';
+			}
+			$email = (string) wp_get_current_user()->user_email;
+			if ( '' !== $email && ApplicationRepo::pending_for_email( $email ) ) {
+				return '<div class="pp-application"><p>' . esc_html__( 'Your partner application is under review. We will email you once it has been processed.', 'partner-program' ) . '</p></div>';
+			}
+		}
+
 		wp_enqueue_script( 'partner-program-forms' );
 		wp_localize_script(
 			'partner-program-forms',
@@ -173,6 +194,14 @@ final class ApplicationForm {
 
 		if ( $errors ) {
 			$this->redirect_back( implode( ' ', $errors ), 'error' );
+		}
+
+		// Don't file a duplicate while one is already pending for this email.
+		if ( ApplicationRepo::pending_for_email( $email ) ) {
+			$this->redirect_back(
+				__( 'You already have a partner application under review for this email.', 'partner-program' ),
+				'error'
+			);
 		}
 
 		// Submission is valid and about to be stored — now arm the rate limit.

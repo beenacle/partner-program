@@ -42,6 +42,36 @@ final class ApplicationRepo {
 		return $row ?: null;
 	}
 
+	/**
+	 * Whether a still-pending application already exists for this email — used
+	 * to keep the same person from filing duplicates.
+	 */
+	public static function pending_for_email( string $email ): bool {
+		if ( '' === $email ) {
+			return false;
+		}
+		global $wpdb;
+		$id = $wpdb->get_var(
+			$wpdb->prepare(
+				'SELECT id FROM ' . self::table() . " WHERE email = %s AND status = 'pending' LIMIT 1",
+				$email
+			)
+		);
+		return (bool) $id;
+	}
+
+	public static function count( array $args = [] ): int {
+		global $wpdb;
+		$where  = '1=1';
+		$params = [];
+		if ( ! empty( $args['status'] ) ) {
+			$where   .= ' AND status = %s';
+			$params[] = (string) $args['status'];
+		}
+		$sql = 'SELECT COUNT(*) FROM ' . self::table() . " WHERE {$where}";
+		return (int) ( $params ? $wpdb->get_var( $wpdb->prepare( $sql, ...$params ) ) : $wpdb->get_var( $sql ) );
+	}
+
 	public static function search( array $args = [] ): array {
 		global $wpdb;
 		$args = wp_parse_args(

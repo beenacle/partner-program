@@ -62,6 +62,8 @@ final class Plugin {
 		add_action( 'partner_program_release_holds', [ HoldReleaser::class, 'release_due' ] );
 		add_action( 'partner_program_recalculate_tiers', [ TierResolver::class, 'recalculate_all' ] );
 		add_action( 'partner_program_prune_logs', [ Logger::class, 'run_scheduled_prune' ] );
+		add_action( 'partner_program_prune_visits', [ Tracker::class, 'run_scheduled_prune' ] );
+		add_action( 'partner_program_generate_payouts', [ \PartnerProgram\Payouts\PayoutManager::class, 'run_scheduled_generation' ] );
 
 		$this->boot_subsystems();
 
@@ -104,6 +106,9 @@ final class Plugin {
 		// so the portal Training tab isn't empty after an auto-update — the
 		// CPT is registered on `init`, which has already run by `admin_init`.
 		Seeder::seed_modules();
+		// Carry legacy per-event email enable/subject choices into the native
+		// WC_Email options (one-time; WooCommerce > Settings > Emails now owns them).
+		Mailer::migrate_legacy_email_settings();
 		update_option( 'partner_program_db_version', PARTNER_PROGRAM_VERSION );
 	}
 
@@ -126,5 +131,6 @@ final class Plugin {
 		( new AgreementManager() )->register();
 		( new Mailer() )->register();
 		( new RestController() )->register();
+		( new \PartnerProgram\Woo\MyAccountMenu() )->register();
 	}
 }

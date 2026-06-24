@@ -150,6 +150,14 @@ final class Settings {
 		self::field_text( 'terms_url', __( 'Terms URL', 'partner-program' ), (string) $s->get( 'general.terms_url' ), '', 'url' );
 		self::field_text( 'login_url', __( 'Login URL override', 'partner-program' ), (string) $s->get( 'general.login_url' ), __( 'Optional', 'partner-program' ), 'url' );
 		echo '</table>';
+
+		echo '<h2>' . esc_html__( 'My Account menu', 'partner-program' ) . '</h2>';
+		echo '<table class="form-table">';
+		self::field_checkbox( 'account_menu_enabled', __( 'Show a Partner Portal link in the WooCommerce My Account menu', 'partner-program' ), (bool) $s->get( 'account_menu.enabled', true ), __( 'Shown only to approved partners.', 'partner-program' ) );
+		self::field_text( 'account_menu_label', __( 'Menu label (partners)', 'partner-program' ), (string) $s->get( 'account_menu.label' ) );
+		self::field_checkbox( 'account_menu_show_apply', __( 'Also show a "Become a Partner" link to logged-in non-partners', 'partner-program' ), (bool) $s->get( 'account_menu.show_apply', false ) );
+		self::field_text( 'account_menu_apply_label', __( 'Menu label (non-partners)', 'partner-program' ), (string) $s->get( 'account_menu.apply_label' ) );
+		echo '</table>';
 	}
 
 	private static function tab_commissions( SettingsRepo $s ): void {
@@ -248,7 +256,7 @@ final class Settings {
 	}
 
 	private static function tab_emails( SettingsRepo $s ): void {
-		echo '<p class="description">' . esc_html__( 'Customize transactional emails sent by the plugin. Leave subject or body blank to use the built-in default. Tokens like {program_name} are replaced at send time — see each event\'s help text for available tokens.', 'partner-program' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Sender name/address and footer below apply to all partner-program emails, and each event\'s message body is edited here. Each email\'s on/off toggle, subject, recipient, preview, and test send live natively under WooCommerce → Settings → Emails. Tokens like {program_name} are replaced at send time.', 'partner-program' ) . '</p>';
 
 		echo '<h2>' . esc_html__( 'Sender', 'partner-program' ) . '</h2>';
 		echo '<table class="form-table">';
@@ -273,13 +281,18 @@ final class Settings {
 		);
 		echo '</table>';
 
-		echo '<h2>' . esc_html__( 'Events', 'partner-program' ) . '</h2>';
+		echo '<h2>' . esc_html__( 'Event bodies', 'partner-program' ) . '</h2>';
+		echo '<p class="description">' . wp_kses_post(
+			sprintf(
+				/* translators: %s: link to the WooCommerce email settings screen */
+				__( 'Edit each email\'s message body below. Enable/disable, subject, and recipient are managed in %s.', 'partner-program' ),
+				'<a href="' . esc_url( admin_url( 'admin.php?page=wc-settings&tab=email' ) ) . '">' . esc_html__( 'WooCommerce → Settings → Emails', 'partner-program' ) . '</a>'
+			)
+		) . '</p>';
 
 		foreach ( EventRegistry::all() as $key => $event ) {
-			$config  = (array) $s->get( 'emails.events.' . $key, [] );
-			$enabled = array_key_exists( 'enabled', $config ) ? (bool) $config['enabled'] : (bool) $event['default_enabled'];
-			$subject = (string) ( $config['subject'] ?? '' );
-			$body    = (string) ( $config['body'] ?? '' );
+			$config = (array) $s->get( 'emails.events.' . $key, [] );
+			$body   = (string) ( $config['body'] ?? '' );
 
 			$tokens_html = '';
 			foreach ( $event['tokens'] as $token => $token_desc ) {
@@ -295,29 +308,13 @@ final class Settings {
 				: __( 'Sent to partner', 'partner-program' );
 
 			?>
-			<details class="pp-email-event" <?php echo $enabled ? 'open' : ''; ?> style="border:1px solid #c3c4c7;background:#fff;padding:8px 16px;margin:0 0 12px;">
+			<details class="pp-email-event" style="border:1px solid #c3c4c7;background:#fff;padding:8px 16px;margin:0 0 12px;">
 				<summary style="cursor:pointer;font-weight:600;padding:6px 0;">
 					<?php echo esc_html( $event['label'] ); ?>
 					<span style="font-weight:400;color:#646970;margin-left:8px;">— <?php echo esc_html( $audience_label ); ?></span>
 				</summary>
 				<p class="description" style="margin-top:4px;"><?php echo esc_html( $event['description'] ); ?></p>
 				<table class="form-table">
-					<tr>
-						<th scope="row"><?php esc_html_e( 'Enabled', 'partner-program' ); ?></th>
-						<td>
-							<label>
-								<input type="checkbox" name="emails_events[<?php echo esc_attr( $key ); ?>][enabled]" value="1" <?php checked( $enabled ); ?> />
-								<?php esc_html_e( 'Send this email', 'partner-program' ); ?>
-							</label>
-						</td>
-					</tr>
-					<tr>
-						<th scope="row"><label for="emails_subject_<?php echo esc_attr( $key ); ?>"><?php esc_html_e( 'Subject', 'partner-program' ); ?></label></th>
-						<td>
-							<input type="text" id="emails_subject_<?php echo esc_attr( $key ); ?>" name="emails_events[<?php echo esc_attr( $key ); ?>][subject]" value="<?php echo esc_attr( $subject ); ?>" class="large-text" placeholder="<?php echo esc_attr( $event['subject'] ); ?>" />
-							<p class="description"><?php esc_html_e( 'Leave blank to use the default shown as placeholder.', 'partner-program' ); ?></p>
-						</td>
-					</tr>
 					<tr>
 						<th scope="row"><label for="emails_body_<?php echo esc_attr( $key ); ?>"><?php esc_html_e( 'Body', 'partner-program' ); ?></label></th>
 						<td>
@@ -878,6 +875,12 @@ final class Settings {
 					'terms_url'     => esc_url_raw( wp_unslash( (string) ( $_POST['terms_url'] ?? '' ) ) ),
 					'login_url'     => esc_url_raw( wp_unslash( (string) ( $_POST['login_url'] ?? '' ) ) ),
 				] );
+				$repo->save_section( 'account_menu', [
+					'enabled'     => ! empty( $_POST['account_menu_enabled'] ),
+					'label'       => sanitize_text_field( wp_unslash( (string) ( $_POST['account_menu_label'] ?? '' ) ) ) ?: __( 'Partner Portal', 'partner-program' ),
+					'show_apply'  => ! empty( $_POST['account_menu_show_apply'] ),
+					'apply_label' => sanitize_text_field( wp_unslash( (string) ( $_POST['account_menu_apply_label'] ?? '' ) ) ) ?: __( 'Become a Partner', 'partner-program' ),
+				] );
 				break;
 
 			case 'commissions':
@@ -1028,12 +1031,13 @@ final class Settings {
 					? wp_unslash( (array) $_POST['emails_events'] )
 					: [];
 				$clean_events = [];
+				// Enable/subject/recipient are owned by the native WC_Email screen;
+				// this tab only edits the per-event body. deep_merge preserves any
+				// legacy enabled/subject values already stored.
 				foreach ( EventRegistry::all() as $event_key => $event_def ) {
-					$row                       = is_array( $raw_events[ $event_key ] ?? null ) ? $raw_events[ $event_key ] : [];
+					$row                        = is_array( $raw_events[ $event_key ] ?? null ) ? $raw_events[ $event_key ] : [];
 					$clean_events[ $event_key ] = [
-						'enabled' => ! empty( $row['enabled'] ),
-						'subject' => sanitize_text_field( (string) ( $row['subject'] ?? '' ) ),
-						'body'    => wp_kses_post( (string) ( $row['body'] ?? '' ) ),
+						'body' => wp_kses_post( (string) ( $row['body'] ?? '' ) ),
 					];
 				}
 				$repo->save_section( 'emails', [

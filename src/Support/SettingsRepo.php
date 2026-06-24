@@ -35,6 +35,15 @@ final class SettingsRepo {
 				'terms_url'      => '',
 				'login_url'      => '',
 			],
+			'account_menu' => [
+				// Show a Partner Portal link in the WooCommerce My Account menu
+				// (only to approved partners). Toggle off to hide it entirely.
+				'enabled'     => true,
+				'label'       => __( 'Partner Portal', 'partner-program' ),
+				// Also show a "Become a Partner" link to logged-in non-partners.
+				'show_apply'  => false,
+				'apply_label' => __( 'Become a Partner', 'partner-program' ),
+			],
 			'commissions'  => [
 				'base_rate'              => 15.0,
 				'calculation_basis'      => 'subtotal_after_discount',
@@ -63,6 +72,9 @@ final class SettingsRepo {
 				'param'               => 'ref',
 				'rewrite_slug'        => '',
 				'trust_proxy_header'  => false,
+				// Days of click/visit history to keep in pp_visits before the
+				// daily prune cron deletes it. 0 = keep forever.
+				'visit_retention_days' => 90,
 			],
 			'attribution'  => [
 				// Inherit attribution from the parent subscription onto each

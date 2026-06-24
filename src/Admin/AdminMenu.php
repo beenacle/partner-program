@@ -15,14 +15,47 @@ defined( 'ABSPATH' ) || exit;
 
 final class AdminMenu {
 
+	/**
+	 * Admin list screens backed by a native WP_List_Table. The slug maps to the
+	 * screen class, which exposes configure_screen_options() for the per-page +
+	 * column-hide Screen Options panel.
+	 *
+	 * @var array<string,class-string>
+	 */
+	private const LIST_SCREENS = [
+		'partner-program-affiliates'   => AffiliatesScreen::class,
+		'partner-program-applications' => ApplicationsScreen::class,
+		'partner-program-commissions'  => CommissionsScreen::class,
+		'partner-program-payouts'      => PayoutsScreen::class,
+		'partner-program-logs'         => LogsScreen::class,
+	];
+
 	public function register(): void {
 		add_action( 'admin_menu', [ $this, 'add_menu' ] );
 		add_action( 'admin_enqueue_scripts', [ $this, 'enqueue' ] );
+
+		// Persist the per-page Screen Options for our native list tables.
+		add_filter( 'set-screen-option', [ $this, 'save_screen_option' ], 10, 3 );
 
 		// CPT for marketing materials.
 		add_action( 'init', [ $this, 'register_material_cpt' ] );
 		// CPT for portal training modules.
 		add_action( 'init', [ $this, 'register_module_cpt' ] );
+	}
+
+	/**
+	 * Save the per-page value for our WP_List_Table screen options.
+	 *
+	 * @param mixed  $status
+	 * @param string $option
+	 * @param mixed  $value
+	 * @return mixed
+	 */
+	public function save_screen_option( $status, $option, $value ) {
+		if ( is_string( $option ) && 0 === strpos( $option, 'pp_' ) && '_per_page' === substr( $option, -9 ) ) {
+			return max( 1, min( 500, (int) $value ) );
+		}
+		return $status;
 	}
 
 	public function enqueue( string $hook ): void {
@@ -47,15 +80,26 @@ final class AdminMenu {
 		);
 
 		add_submenu_page( 'partner-program', __( 'Dashboard', 'partner-program' ), __( 'Dashboard', 'partner-program' ), $cap, 'partner-program', [ $this, 'render_dashboard' ] );
-		add_submenu_page( 'partner-program', __( 'Affiliates', 'partner-program' ), __( 'Affiliates', 'partner-program' ), $cap, 'partner-program-affiliates', [ AffiliatesScreen::class, 'render' ] );
-		add_submenu_page( 'partner-program', __( 'Applications', 'partner-program' ), __( 'Applications', 'partner-program' ), $cap, 'partner-program-applications', [ ApplicationsScreen::class, 'render' ] );
-		add_submenu_page( 'partner-program', __( 'Commissions', 'partner-program' ), __( 'Commissions', 'partner-program' ), $cap, 'partner-program-commissions', [ CommissionsScreen::class, 'render' ] );
-		add_submenu_page( 'partner-program', __( 'Payouts', 'partner-program' ), __( 'Payouts', 'partner-program' ), $cap, 'partner-program-payouts', [ PayoutsScreen::class, 'render' ] );
+
+		$hooks = [];
+		$hooks['partner-program-affiliates']   = add_submenu_page( 'partner-program', __( 'Affiliates', 'partner-program' ), __( 'Affiliates', 'partner-program' ), $cap, 'partner-program-affiliates', [ AffiliatesScreen::class, 'render' ] );
+		$hooks['partner-program-applications'] = add_submenu_page( 'partner-program', __( 'Applications', 'partner-program' ), __( 'Applications', 'partner-program' ), $cap, 'partner-program-applications', [ ApplicationsScreen::class, 'render' ] );
+		$hooks['partner-program-commissions']  = add_submenu_page( 'partner-program', __( 'Commissions', 'partner-program' ), __( 'Commissions', 'partner-program' ), $cap, 'partner-program-commissions', [ CommissionsScreen::class, 'render' ] );
+		$hooks['partner-program-payouts']      = add_submenu_page( 'partner-program', __( 'Payouts', 'partner-program' ), __( 'Payouts', 'partner-program' ), $cap, 'partner-program-payouts', [ PayoutsScreen::class, 'render' ] );
 		add_submenu_page( 'partner-program', __( 'Materials', 'partner-program' ), __( 'Materials', 'partner-program' ), $cap, 'edit.php?post_type=pp_material' );
 		add_submenu_page( 'partner-program', __( 'Training Modules', 'partner-program' ), __( 'Training Modules', 'partner-program' ), $cap, 'edit.php?post_type=pp_module' );
 		add_submenu_page( 'partner-program', __( 'Compliance', 'partner-program' ), __( 'Compliance', 'partner-program' ), $cap, 'partner-program-compliance', [ ComplianceScreen::class, 'render' ] );
 		add_submenu_page( 'partner-program', __( 'Settings', 'partner-program' ), __( 'Settings', 'partner-program' ), $cap, 'partner-program-settings', [ Settings::class, 'render_page' ] );
-		add_submenu_page( 'partner-program', __( 'Logs', 'partner-program' ), __( 'Logs', 'partner-program' ), $cap, 'partner-program-logs', [ LogsScreen::class, 'render' ] );
+		$hooks['partner-program-logs']         = add_submenu_page( 'partner-program', __( 'Logs', 'partner-program' ), __( 'Logs', 'partner-program' ), $cap, 'partner-program-logs', [ LogsScreen::class, 'render' ] );
+
+		// Register Screen Options (per-page + column visibility) for each list
+		// screen that has been migrated to a native WP_List_Table.
+		foreach ( self::LIST_SCREENS as $slug => $screen_class ) {
+			$hook = $hooks[ $slug ] ?? '';
+			if ( $hook && method_exists( $screen_class, 'configure_screen_options' ) ) {
+				add_action( "load-{$hook}", [ $screen_class, 'configure_screen_options' ] );
+			}
+		}
 	}
 
 	public function render_dashboard(): void {

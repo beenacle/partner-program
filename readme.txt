@@ -4,7 +4,7 @@ Tags: affiliate, partner, woocommerce, referral, commission
 Requires at least: 6.2
 Tested up to: 6.6
 Requires PHP: 7.4
-Stable tag: 1.5.2
+Stable tag: 1.5.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -52,6 +52,27 @@ If both refer to the same affiliate, the source is recorded as `both` and the co
 Generate a payout batch from *Partner Program → Payouts*. Download the CSV, send funds via your preferred method (ACH, PayPal, Zelle, CashApp, Wise, check), then click "Mark paid" so commissions roll to status `paid`.
 
 == Changelog ==
+
+= 1.5.3 =
+Native-everywhere pass (WordPress/WooCommerce patterns) + bug fixes. Behaviour is unchanged for partners; the differences are in the admin.
+
+Native admin:
+* All five admin list screens (Affiliates, Applications, Commissions, Payouts, Logs) are now native `WP_List_Table`s: sortable columns where the data supports it, per-page + column-visibility Screen Options, native status-filter links, native bulk actions (Commissions), and a native search box (Affiliates).
+* Transactional emails are now native `WC_Email` subclasses — each partner email appears under WooCommerce > Settings > Emails with the standard enable / recipient / subject / preview / test controls and renders through the store's email template. Existing per-event enable/subject choices are migrated into those WooCommerce options once, automatically. The plugin's Emails tab now edits only the per-event message body.
+
+New:
+* Payouts: the "Schedule" / "Payout day" settings are now honoured by a daily cron that generates the batch when due (previously batches only ran on a manual click). Exactly one batch per period, with catch-up if a day is missed.
+* My Account: an optional "Partner Portal" / "Become a Partner" link in the WooCommerce My Account menu, toggleable under Settings > General.
+* Training: Modules 2–4 (Peptide Research Library, Marketing Resources, FAQ) added to the default seeded content.
+
+Fixes & hardening:
+* Security: the partner portal's payout-method / agreement / certification POST handlers now re-check approved status, so a suspended or rejected partner can no longer update payout details, re-accept the agreement, or record a certification by posting directly.
+* Payouts: auto-generated weekly batches are labelled with the week they cover (not last month); switching schedule mid-period no longer emits an extra batch; due-day is evaluated in site-local time.
+* Emails: an email enabled through WooCommerce > Settings > Emails is no longer silently suppressed; the `partner_program_email_recipients` filter can again skip a send by returning an empty array; admin-notification recipients configured in WooCommerce are honoured.
+* Performance/scale: `pp_visits` now has a `created_at` index and a daily prune cron (90-day default, configurable; 0 = keep forever); `pp_commissions` gains composite indexes for the hot affiliate/status queries.
+* Applications and Logs admin lists are paginated (no longer silently capped at 50 / 200 rows).
+* Uninstall (with PARTNER_PROGRAM_DELETE_ALL) now also removes the training-module / marketing-material posts.
+* Removed dead mailer code and an orphaned email template.
 
 = 1.5.2 =
 * Fix: the certification quiz could fail with "Your session expired before the quiz was submitted." The logged-in portal form was wrongly using the cached-page nonce refresh built for the logged-out application/login pages, which replaced its valid nonce with one minted in an anonymous context. The portal is never full-page-cached, so its nonce is always fresh — removed the client-side refresh from the certify form.

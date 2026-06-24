@@ -98,11 +98,21 @@ final class Activator {
 		if ( ! wp_next_scheduled( 'partner_program_prune_logs' ) ) {
 			wp_schedule_event( time() + DAY_IN_SECONDS, 'daily', 'partner_program_prune_logs' );
 		}
+		if ( ! wp_next_scheduled( 'partner_program_prune_visits' ) ) {
+			wp_schedule_event( time() + DAY_IN_SECONDS, 'daily', 'partner_program_prune_visits' );
+		}
+		if ( ! wp_next_scheduled( 'partner_program_generate_payouts' ) ) {
+			// Daily tick; the handler decides whether today is actually a
+			// payout day based on the configured schedule.
+			wp_schedule_event( time() + DAY_IN_SECONDS, 'daily', 'partner_program_generate_payouts' );
+		}
 	}
 
 	private static function clear_crons(): void {
 		wp_clear_scheduled_hook( 'partner_program_release_holds' );
 		wp_clear_scheduled_hook( 'partner_program_recalculate_tiers' );
 		wp_clear_scheduled_hook( 'partner_program_prune_logs' );
+		wp_clear_scheduled_hook( 'partner_program_prune_visits' );
+		wp_clear_scheduled_hook( 'partner_program_generate_payouts' );
 	}
 }

@@ -184,7 +184,9 @@ final class Portal {
 		check_admin_referer( 'pp_save_payout', '_pp_save_payout_nonce' );
 
 		$affiliate = AffiliateRepo::find_by_user( get_current_user_id() );
-		if ( ! $affiliate ) {
+		// Re-check approval here too: render_portal() gates the UI, but a
+		// suspended/rejected partner could still POST straight to this handler.
+		if ( ! $affiliate || 'approved' !== $affiliate['status'] ) {
 			wp_safe_redirect( wp_get_referer() ?: home_url( '/' ) );
 			exit;
 		}
@@ -249,7 +251,7 @@ final class Portal {
 		}
 		check_admin_referer( 'pp_accept_agreement', '_pp_agreement_nonce' );
 		$affiliate = AffiliateRepo::find_by_user( get_current_user_id() );
-		if ( ! $affiliate ) {
+		if ( ! $affiliate || 'approved' !== $affiliate['status'] ) {
 			wp_safe_redirect( home_url( '/' ) );
 			exit;
 		}
@@ -287,7 +289,7 @@ final class Portal {
 		}
 
 		$affiliate = AffiliateRepo::find_by_user( get_current_user_id() );
-		if ( ! $affiliate ) {
+		if ( ! $affiliate || 'approved' !== $affiliate['status'] ) {
 			wp_safe_redirect( home_url( '/' ) );
 			exit;
 		}

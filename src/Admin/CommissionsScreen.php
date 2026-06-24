@@ -9,6 +9,7 @@ declare( strict_types = 1 );
 
 namespace PartnerProgram\Admin;
 
+use PartnerProgram\Admin\Tables\CommissionsTable;
 use PartnerProgram\Domain\AffiliateRepo;
 use PartnerProgram\Domain\CommissionRepo;
 use PartnerProgram\Support\Capabilities;
@@ -19,6 +20,22 @@ defined( 'ABSPATH' ) || exit;
 
 final class CommissionsScreen {
 
+	/**
+	 * Registered on the screen's load hook (see AdminMenu) so the per-page and
+	 * column-visibility Screen Options panel works natively.
+	 */
+	public static function configure_screen_options(): void {
+		add_screen_option(
+			'per_page',
+			[
+				'label'   => __( 'Commissions per page', 'partner-program' ),
+				'default' => 100,
+				'option'  => 'pp_commissions_per_page',
+			]
+		);
+		( new CommissionsTable() )->register_screen_columns();
+	}
+
 	public static function render(): void {
 		if ( ! current_user_can( Capabilities::CAP_MANAGE ) ) {
 			return;
@@ -27,15 +44,8 @@ final class CommissionsScreen {
 		self::handle_bulk();
 		self::handle_manual_adjustment();
 
-		$status      = isset( $_GET['status'] ) ? sanitize_key( (string) $_GET['status'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$page        = isset( $_GET['paged'] ) ? max( 1, (int) $_GET['paged'] ) : 1; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$per_page    = 100;
-		$total_items = CommissionRepo::count( [ 'status' => $status ] );
-		$total_pages = max( 1, (int) ceil( $total_items / $per_page ) );
-		$rows        = CommissionRepo::search( [ 'status' => $status, 'per_page' => $per_page, 'page' => $page ] );
-
-		$affiliates = AffiliateRepo::find_many( array_map( static fn ( $r ): int => (int) $r['affiliate_id'], $rows ) );
-		cache_users( array_values( array_filter( array_map( static fn ( $a ): int => (int) ( $a['user_id'] ?? 0 ), $affiliates ) ) ) );
+		$list = new CommissionsTable();
+		$list->prepare_items();
 
 		echo '<div class="wrap"><h1>' . esc_html__( 'Commissions', 'partner-program' ) . '</h1>';
 
@@ -43,84 +53,12 @@ final class CommissionsScreen {
 			echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Changes saved.', 'partner-program' ) . '</p></div>';
 		}
 
-		Ui::status_filter(
-			'partner-program-commissions',
-			$status,
-			[
-				''         => __( 'All', 'partner-program' ),
-				'pending'  => __( 'Pending', 'partner-program' ),
-				'approved' => __( 'Approved', 'partner-program' ),
-				'paid'     => __( 'Paid', 'partner-program' ),
-				'rejected' => __( 'Rejected', 'partner-program' ),
-				'clawback' => __( 'Clawback', 'partner-program' ),
-			]
-		);
+		$list->views();
 
+		// The native bulk-action controls + the 'bulk-commissions' nonce are
+		// rendered by $list->display() inside this form; handle_bulk() reads them.
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin.php?page=partner-program-commissions' ) ) . '">';
-		wp_nonce_field( 'pp_bulk_commissions' );
-		echo '<select name="bulk_action">';
-		echo '<option value="">' . esc_html__( '— Bulk action —', 'partner-program' ) . '</option>';
-		echo '<option value="approve">' . esc_html__( 'Approve', 'partner-program' ) . '</option>';
-		echo '<option value="reject">' . esc_html__( 'Reject', 'partner-program' ) . '</option>';
-		echo '<option value="clawback">' . esc_html__( 'Mark clawback', 'partner-program' ) . '</option>';
-		echo '</select> ' . get_submit_button( __( 'Apply', 'partner-program' ), 'secondary', 'apply_bulk', false );
-
-		echo '<table class="wp-list-table widefat fixed striped"><thead><tr>'
-			. '<td id="cb" class="manage-column column-cb check-column"><label class="screen-reader-text" for="cb-select-all">' . esc_html__( 'Select all', 'partner-program' ) . '</label>'
-			. '<input type="checkbox" id="cb-select-all" onclick="document.querySelectorAll(\'input[name=\\\'ids[]\\\']\').forEach(c=>c.checked=this.checked)" /></td>'
-			. '<th>' . esc_html__( 'ID', 'partner-program' ) . '</th><th>' . esc_html__( 'Affiliate', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Order', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Source', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Base', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Rate %', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Amount', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Status', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Releases', 'partner-program' ) . '</th>'
-			. '<th>' . esc_html__( 'Created', 'partner-program' ) . '</th>'
-			. '</tr></thead><tbody>';
-
-		foreach ( $rows as $row ) {
-			$aff  = $affiliates[ (int) $row['affiliate_id'] ] ?? null;
-			$user = $aff ? get_userdata( (int) $aff['user_id'] ) : null;
-			echo '<tr>';
-			echo '<th scope="row" class="check-column"><input type="checkbox" name="ids[]" value="' . (int) $row['id'] . '" /></th>';
-			echo '<td>#' . (int) $row['id'] . '</td>';
-			echo '<td>' . esc_html( $user ? $user->user_email : '#' . $row['affiliate_id'] ) . '</td>';
-			$order_id = isset( $row['order_id'] ) && '' !== $row['order_id'] && null !== $row['order_id'] ? (int) $row['order_id'] : 0;
-			if ( $order_id > 0 ) {
-				echo '<td><a href="' . esc_url( self::order_edit_url( $order_id ) ) . '">#' . $order_id . '</a></td>';
-			} else {
-				echo '<td>—</td>';
-			}
-			echo '<td>' . esc_html( (string) $row['source'] ) . ( $row['coupon_used'] ? ' ★' : '' ) . '</td>';
-			echo '<td>' . esc_html( Money::format( (int) $row['base_amount_cents'], (string) $row['currency'] ) ) . '</td>';
-			echo '<td>' . esc_html( (string) $row['rate'] ) . '</td>';
-			echo '<td>' . esc_html( Money::format( (int) $row['amount_cents'], (string) $row['currency'] ) ) . '</td>';
-			echo '<td>' . esc_html( (string) $row['status'] ) . '</td>';
-			echo '<td>' . esc_html( (string) ( $row['hold_release_at'] ?? '' ) ) . '</td>';
-			echo '<td>' . esc_html( (string) $row['created_at'] ) . '</td>';
-			echo '</tr>';
-		}
-		if ( ! $rows ) {
-			echo '<tr><td colspan="11">' . esc_html__( 'None.', 'partner-program' ) . '</td></tr>';
-		}
-		echo '</tbody></table>';
-
-		if ( $total_pages > 1 ) {
-			echo '<div class="tablenav bottom"><div class="tablenav-pages">';
-			echo paginate_links( // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
-				[
-					'base'      => add_query_arg( 'paged', '%#%' ),
-					'format'    => '',
-					'total'     => $total_pages,
-					'current'   => $page,
-					'prev_text' => '&laquo;',
-					'next_text' => '&raquo;',
-				]
-			);
-			echo '</div></div>';
-		}
-
+		$list->display();
 		echo '</form>';
 
 		echo '<h2>' . esc_html__( 'Manual adjustment', 'partner-program' ) . '</h2>';
@@ -138,12 +76,19 @@ final class CommissionsScreen {
 	}
 
 	private static function handle_bulk(): void {
-		if ( empty( $_POST['bulk_action'] ) || empty( $_POST['ids'] ) ) {
+		// Native WP_List_Table bulk submit: the selected action is in `action`
+		// (top control) or `action2` (bottom); row ids are in ids[].
+		$action = '';
+		if ( isset( $_POST['action'] ) && '-1' !== (string) $_POST['action'] ) {
+			$action = sanitize_key( (string) $_POST['action'] );
+		} elseif ( isset( $_POST['action2'] ) && '-1' !== (string) $_POST['action2'] ) {
+			$action = sanitize_key( (string) $_POST['action2'] );
+		}
+		if ( '' === $action || empty( $_POST['ids'] ) ) {
 			return;
 		}
-		check_admin_referer( 'pp_bulk_commissions' );
-		$action = sanitize_key( (string) $_POST['bulk_action'] );
-		$ids    = array_map( 'intval', (array) $_POST['ids'] );
+		check_admin_referer( 'bulk-commissions' );
+		$ids = array_map( 'intval', (array) $_POST['ids'] );
 		$map    = [ 'approve' => 'approved', 'reject' => 'rejected', 'clawback' => 'clawback' ];
 		if ( ! isset( $map[ $action ] ) ) {
 			return;
@@ -177,23 +122,6 @@ final class CommissionsScreen {
 		}
 		wp_safe_redirect( add_query_arg( 'done', 1, admin_url( 'admin.php?page=partner-program-commissions' ) ) );
 		exit;
-	}
-
-	/**
-	 * HPOS-aware "Edit order" URL. With HPOS enabled, orders aren't
-	 * `wp_posts` rows so `get_edit_post_link()` returns null and produces
-	 * a broken `#` link. `WC_Order::get_edit_order_url()` knows about both
-	 * storage modes; we fall back to `get_edit_post_link()` only when
-	 * Woo isn't loaded for some reason (defensive).
-	 */
-	private static function order_edit_url( int $order_id ): string {
-		if ( function_exists( 'wc_get_order' ) ) {
-			$order = wc_get_order( $order_id );
-			if ( $order ) {
-				return $order->get_edit_order_url();
-			}
-		}
-		return (string) ( get_edit_post_link( $order_id ) ?: '#' );
 	}
 
 	private static function handle_manual_adjustment(): void {

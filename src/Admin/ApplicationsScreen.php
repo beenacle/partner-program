@@ -9,6 +9,7 @@ declare( strict_types = 1 );
 
 namespace PartnerProgram\Admin;
 
+use PartnerProgram\Admin\Tables\ApplicationsTable;
 use PartnerProgram\Application\PrivateUploads;
 use PartnerProgram\Domain\ApplicationRepo;
 use PartnerProgram\Support\Capabilities;
@@ -18,6 +19,22 @@ use PartnerProgram\Support\Ui;
 defined( 'ABSPATH' ) || exit;
 
 final class ApplicationsScreen {
+
+	/**
+	 * Registered on the screen's load hook (see AdminMenu) so the per-page and
+	 * column-visibility Screen Options panel works natively.
+	 */
+	public static function configure_screen_options(): void {
+		add_screen_option(
+			'per_page',
+			[
+				'label'   => __( 'Applications per page', 'partner-program' ),
+				'default' => 50,
+				'option'  => 'pp_applications_per_page',
+			]
+		);
+		( new ApplicationsTable() )->register_screen_columns();
+	}
 
 	public static function render(): void {
 		if ( ! current_user_can( Capabilities::CAP_MANAGE ) ) {
@@ -30,37 +47,13 @@ final class ApplicationsScreen {
 			return;
 		}
 
-		$status = isset( $_GET['status'] ) ? sanitize_key( (string) $_GET['status'] ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
-		$rows   = ApplicationRepo::search( [ 'status' => $status, 'per_page' => 50 ] );
+		$list = new ApplicationsTable();
+		$list->prepare_items();
 
 		echo '<div class="wrap"><h1>' . esc_html__( 'Applications', 'partner-program' ) . '</h1>';
-		Ui::status_filter(
-			'partner-program-applications',
-			$status,
-			[
-				''         => __( 'All', 'partner-program' ),
-				'pending'  => __( 'Pending', 'partner-program' ),
-				'approved' => __( 'Approved', 'partner-program' ),
-				'rejected' => __( 'Rejected', 'partner-program' ),
-			]
-		);
-
-		echo '<table class="wp-list-table widefat fixed striped"><thead><tr><th>' . esc_html__( 'ID', 'partner-program' ) . '</th><th>' . esc_html__( 'Email', 'partner-program' ) . '</th><th>' . esc_html__( 'Status', 'partner-program' ) . '</th><th>' . esc_html__( 'Submitted', 'partner-program' ) . '</th><th><span class="screen-reader-text">' . esc_html__( 'Actions', 'partner-program' ) . '</span></th></tr></thead><tbody>';
-		foreach ( $rows as $row ) {
-			printf(
-				'<tr><td>#%1$d</td><td>%2$s</td><td>%3$s</td><td>%4$s</td><td><a href="%5$s">%6$s</a></td></tr>',
-				(int) $row['id'],
-				esc_html( (string) $row['email'] ),
-				esc_html( (string) $row['status'] ),
-				esc_html( (string) $row['created_at'] ),
-				esc_url( admin_url( 'admin.php?page=partner-program-applications&id=' . (int) $row['id'] ) ),
-				esc_html__( 'Review', 'partner-program' )
-			);
-		}
-		if ( ! $rows ) {
-			echo '<tr><td colspan="5">' . esc_html__( 'No applications.', 'partner-program' ) . '</td></tr>';
-		}
-		echo '</tbody></table></div>';
+		$list->views();
+		$list->display();
+		echo '</div>';
 	}
 
 	private static function render_single( int $id ): void {

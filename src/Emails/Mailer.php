@@ -2,11 +2,11 @@
 /**
  * Central transactional mailer.
  *
- * Subscribes to lifecycle action hooks (`partner_program_*`) and dispatches
- * one configurable email per event. Subject/body templates are loaded
- * from {@see EventRegistry} with optional per-event overrides stored in
- * settings, then token-replaced and wrapped in
- * `templates/emails/wrapper.php` for HTML delivery.
+ * Subscribes to lifecycle action hooks (`partner_program_*`), builds the
+ * per-event tokens, and dispatches each event to its native {@see EventEmail}
+ * (a WC_Email subclass registered via the `woocommerce_email_classes` filter),
+ * which owns the enable / recipient / subject controls and renders through the
+ * store's email template. Subject/body defaults come from {@see EventRegistry}.
  *
  * @package PartnerProgram
  */
@@ -21,7 +21,6 @@ use PartnerProgram\Domain\PayoutRepo;
 use PartnerProgram\Domain\CommissionRepo;
 use PartnerProgram\Support\Money;
 use PartnerProgram\Support\SettingsRepo;
-use PartnerProgram\Support\Template;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -35,6 +34,72 @@ final class Mailer {
 		add_action( 'partner_program_violation_flagged',     [ $this, 'on_violation_flagged' ], 10, 2 );
 		add_action( 'partner_program_payout_paid',           [ $this, 'on_payout_paid' ] );
 		add_action( 'partner_program_commission_approved',   [ $this, 'on_commission_approved' ] );
+
+		// Expose every event as a native WC_Email so it shows under
+		// WooCommerce > Settings > Emails (enable / recipient / subject /
+		// preview / test). The handlers above still build the tokens and call
+		// send(), which now dispatches to the matching WC_Email instance.
+		add_filter( 'woocommerce_email_classes', [ $this, 'register_wc_emails' ] );
+	}
+
+	/**
+	 * @param array<string, \WC_Email> $emails
+	 * @return array<string, mixed>
+	 */
+	public function register_wc_emails( $emails ) {
+		if ( ! class_exists( '\WC_Email' ) ) {
+			return $emails;
+		}
+		foreach ( array_keys( EventRegistry::all() ) as $event ) {
+			$emails[ 'PP_Email_' . $event ] = new EventEmail( (string) $event );
+		}
+		return $emails;
+	}
+
+	/**
+	 * One-time upgrade migration: carry any *customized* per-event enable/subject
+	 * choices from the legacy Emails settings tab into the corresponding native
+	 * WC_Email option (`woocommerce_pp_<event>_settings`), which is now the source
+	 * of truth. Only values that differ from the EventRegistry defaults are
+	 * copied, so future default changes still apply to un-customized events.
+	 * Idempotent via the `partner_program_emails_migrated` flag.
+	 */
+	public static function migrate_legacy_email_settings(): void {
+		if ( get_option( 'partner_program_emails_migrated' ) ) {
+			return;
+		}
+
+		$stored = get_option( 'partner_program_settings', [] );
+		$events = ( is_array( $stored ) && isset( $stored['emails']['events'] ) && is_array( $stored['emails']['events'] ) )
+			? $stored['emails']['events']
+			: [];
+
+		foreach ( $events as $event => $cfg ) {
+			if ( ! is_array( $cfg ) ) {
+				continue;
+			}
+			$def             = EventRegistry::get( (string) $event );
+			$default_enabled = ! empty( $def['default_enabled'] );
+			$default_subject = (string) ( $def['subject'] ?? '' );
+
+			$opt = 'woocommerce_pp_' . sanitize_key( (string) $event ) . '_settings';
+			$wc  = get_option( $opt, [] );
+			$wc  = is_array( $wc ) ? $wc : [];
+
+			if ( array_key_exists( 'enabled', $cfg ) && (bool) $cfg['enabled'] !== $default_enabled ) {
+				$wc['enabled'] = ! empty( $cfg['enabled'] ) ? 'yes' : 'no';
+			}
+			$subject = isset( $cfg['subject'] ) ? trim( (string) $cfg['subject'] ) : '';
+			if ( '' !== $subject && $subject !== $default_subject ) {
+				$wc['subject'] = $subject;
+			}
+
+			if ( $wc ) {
+				update_option( $opt, $wc );
+			}
+		}
+
+		update_option( 'partner_program_emails_migrated', 1 );
 	}
 
 	/* ------------------------------------------------------------------
@@ -56,15 +121,15 @@ final class Mailer {
 			return false;
 		}
 
-		$settings = new SettingsRepo();
-		$config   = (array) $settings->get( 'emails.events.' . $event, [] );
-		$enabled  = array_key_exists( 'enabled', $config ) ? (bool) $config['enabled'] : (bool) $definition['default_enabled'];
+		// Whether the email is enabled is owned entirely by the native WC_Email
+		// instance (WooCommerce > Settings > Emails); EventEmail::trigger_event()
+		// checks is_enabled() before sending. Legacy per-event enable choices are
+		// migrated into those WC options once on upgrade.
 
 		/**
 		 * Suppress sending of a specific event. Return false to silently drop.
 		 */
-		$enabled = (bool) apply_filters( 'partner_program_email_enabled', $enabled, $event, $context );
-		if ( ! $enabled ) {
+		if ( ! (bool) apply_filters( 'partner_program_email_enabled', true, $event, $context ) ) {
 			return false;
 		}
 
@@ -76,30 +141,30 @@ final class Mailer {
 		 * @param string              $event
 		 * @param array<string,mixed> $context
 		 */
-		$recipients = (array) apply_filters( 'partner_program_email_recipients', $recipients, $event, $context );
-		$recipients = self::normalize_recipients( $recipients );
-		if ( ! $recipients ) {
+		$recipients = self::normalize_recipients( (array) apply_filters( 'partner_program_email_recipients', $recipients, $event, $context ) );
+
+		// Partner-audience emails are addressed from $recipients, so an empty
+		// list (e.g. a filter returning [] to suppress, or an invalid address)
+		// must skip the send — honoring the filter's documented contract. Admin
+		// emails ignore $recipients and use their own configured WC recipient.
+		$is_partner = 'partner' === ( $definition['audience'] ?? 'partner' );
+		if ( $is_partner && ! $recipients ) {
 			return false;
 		}
 
-		$subject_tpl = self::trim_or_default( (string) ( $config['subject'] ?? '' ), (string) $definition['subject'] );
-		$body_tpl    = self::trim_or_default( (string) ( $config['body'] ?? '' ), (string) $definition['body'] );
-
-		$subject = self::replace_tokens( $subject_tpl, $tokens );
-		$subject = wp_specialchars_decode( wp_strip_all_tags( $subject ), ENT_QUOTES );
-
-		$body_plain = self::replace_tokens( $body_tpl, $tokens );
-
-		/** @var string $subject */
-		$subject = (string) apply_filters( 'partner_program_email_subject', $subject, $event, $tokens, $context );
-		/** @var string $body_plain */
-		$body_plain = (string) apply_filters( 'partner_program_email_body', $body_plain, $event, $tokens, $context );
-
-		$body_html = self::wrap_html( $body_plain, $subject );
-
-		$headers = self::build_headers( $settings );
-
-		return (bool) wp_mail( $recipients, $subject, $body_html, $headers );
+		// Dispatch to the matching native WC_Email instance, which owns the
+		// enable / recipient / subject controls and renders through the store's
+		// email template.
+		if ( ! function_exists( 'WC' ) || ! WC() || ! WC()->mailer() ) {
+			return false;
+		}
+		foreach ( WC()->mailer()->get_emails() as $mail ) {
+			if ( $mail instanceof EventEmail && 'pp_' . $event === $mail->id ) {
+				$mail->trigger_event( $recipients, $tokens );
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/* ------------------------------------------------------------------
@@ -273,63 +338,6 @@ final class Mailer {
 	 * ----------------------------------------------------------------*/
 
 	/**
-	 * @param array<string,mixed> $tokens
-	 */
-	private static function replace_tokens( string $template, array $tokens ): string {
-		$search  = [];
-		$replace = [];
-		foreach ( $tokens as $k => $v ) {
-			$search[]  = $k;
-			$replace[] = is_scalar( $v ) ? (string) $v : wp_json_encode( $v );
-		}
-		return str_replace( $search, $replace, $template );
-	}
-
-	/**
-	 * Wrap the body in WooCommerce's native email template so partner emails
-	 * match the store's transactional emails and inherit the merchant's email
-	 * branding (header image, base/background colours, footer) from
-	 * WooCommerce > Settings > Emails. $heading becomes the email's H1.
-	 */
-	private static function wrap_html( string $body, string $heading = '' ): string {
-		// Author HTML is trusted (already sanitized upstream); plain text gets
-		// auto-paragraphed so newlines render.
-		$content = ( false !== stripos( $body, '<p' ) || false !== stripos( $body, '<br' ) )
-			? wp_kses_post( $body )
-			: wpautop( wp_kses_post( $body ) );
-
-		if ( function_exists( 'WC' ) && WC() && WC()->mailer() ) {
-			$mailer  = WC()->mailer();
-			$wrapped = $mailer->wrap_message( $heading, $content );
-			// Inline the CSS so colours survive email clients that strip <style>.
-			return method_exists( $mailer, 'style_inline' ) ? (string) $mailer->style_inline( $wrapped ) : $wrapped;
-		}
-
-		// WooCommerce is a hard dependency, so this is effectively unreachable;
-		// degrade to the raw HTML rather than fatally erroring.
-		return $content;
-	}
-
-	private static function build_headers( SettingsRepo $settings ): array {
-		$from_name  = (string) $settings->get( 'emails.from_name', '' );
-		$from_email = (string) $settings->get( 'emails.from_email', '' );
-
-		if ( '' === $from_name ) {
-			$from_name = self::program_name( $settings );
-		}
-		if ( '' === $from_email || ! is_email( $from_email ) ) {
-			$from_email = (string) $settings->get( 'general.support_email', get_option( 'admin_email' ) );
-		}
-
-		$headers = [ 'Content-Type: text/html; charset=UTF-8' ];
-		if ( is_email( $from_email ) ) {
-			$headers[] = sprintf( 'From: %s <%s>', $from_name, $from_email );
-			$headers[] = 'Reply-To: ' . $from_email;
-		}
-		return $headers;
-	}
-
-	/**
 	 * @param string|string[] $to
 	 * @return string[]
 	 */
@@ -344,11 +352,6 @@ final class Mailer {
 		return array_values( array_unique( $out ) );
 	}
 
-	private static function trim_or_default( string $candidate, string $fallback ): string {
-		$candidate = trim( $candidate );
-		return '' === $candidate ? $fallback : $candidate;
-	}
-
 	private static function program_name( SettingsRepo $settings ): string {
 		return (string) $settings->get( 'general.program_name', __( 'Partner Program', 'partner-program' ) );
 	}
@@ -361,14 +364,5 @@ final class Mailer {
 	private static function login_url( SettingsRepo $settings ): string {
 		$override = (string) $settings->get( 'general.login_url', '' );
 		return '' !== $override ? $override : wp_login_url();
-	}
-
-	private static function footer_text( SettingsRepo $settings ): string {
-		$default = sprintf(
-			/* translators: %s: program name */
-			__( 'You are receiving this email because of your involvement with the %s.', 'partner-program' ),
-			self::program_name( $settings )
-		);
-		return (string) $settings->get( 'emails.footer_text', $default ) ?: $default;
 	}
 }

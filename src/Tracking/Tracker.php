@@ -173,4 +173,23 @@ final class Tracker {
 		}
 		return null;
 	}
+
+	/**
+	 * Daily cron: delete visit rows older than the configured retention window
+	 * so pp_visits doesn't grow without bound. 0 = keep forever.
+	 */
+	public static function run_scheduled_prune(): void {
+		$days = (int) ( new SettingsRepo() )->get( 'tracking.visit_retention_days', 90 );
+		if ( $days <= 0 ) {
+			return;
+		}
+		global $wpdb;
+		$cutoff = gmdate( 'Y-m-d H:i:s', time() - ( $days * DAY_IN_SECONDS ) );
+		$wpdb->query(
+			$wpdb->prepare(
+				'DELETE FROM ' . $wpdb->prefix . 'pp_visits WHERE created_at < %s',
+				$cutoff
+			)
+		);
+	}
 }
