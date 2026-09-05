@@ -54,6 +54,12 @@ final class Logger {
 	 * removed. $days <= 0 means "keep forever" — caller is expected to
 	 * pre-check the retention setting in that case; we still bail out
 	 * defensively here so a misconfigured cron can never wipe the table.
+	 *
+	 * Deletion is chunked: an unbounded DELETE on a multi-million-row
+	 * pp_logs table can hold a lock long enough for the daily cron worker
+	 * to time out before it commits. We loop in batches of CHUNK_SIZE and
+	 * stop once a batch deletes fewer rows than requested (= no more
+	 * candidates) or we've spent MAX_SECONDS in the loop.
 	 */
 	public static function prune_older_than( int $days ): int {
 		if ( $days <= 0 ) {
@@ -62,9 +68,32 @@ final class Logger {
 		global $wpdb;
 		$cutoff = gmdate( 'Y-m-d H:i:s', time() - ( $days * DAY_IN_SECONDS ) );
 		$table  = $wpdb->prefix . 'pp_logs';
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-		$wpdb->query( $wpdb->prepare( "DELETE FROM {$table} WHERE created_at < %s", $cutoff ) );
-		return (int) $wpdb->rows_affected;
+
+		$chunk_size  = 5000;
+		$max_seconds = 30;
+		$started     = microtime( true );
+		$total       = 0;
+
+		do {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->query(
+				$wpdb->prepare(
+					"DELETE FROM {$table} WHERE created_at < %s LIMIT %d",
+					$cutoff,
+					$chunk_size
+				)
+			);
+			$deleted = (int) $wpdb->rows_affected;
+			$total  += $deleted;
+			if ( $deleted < $chunk_size ) {
+				break;
+			}
+			if ( ( microtime( true ) - $started ) > $max_seconds ) {
+				break;
+			}
+		} while ( true );
+
+		return $total;
 	}
 
 	/**

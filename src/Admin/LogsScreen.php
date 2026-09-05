@@ -65,7 +65,12 @@ final class LogsScreen {
 		echo ' ';
 		printf(
 			'<a href="%s">%s</a>',
-			esc_url( admin_url( 'admin.php?page=partner-program-settings#logs' ) ),
+			esc_url(
+				add_query_arg(
+					[ 'page' => 'partner-program-settings', 'tab' => 'logs' ],
+					admin_url( 'admin.php' )
+				)
+			),
 			esc_html__( 'Edit retention setting', 'partner-program' )
 		);
 		echo '</p>';

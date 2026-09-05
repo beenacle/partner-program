@@ -229,6 +229,15 @@ final class Privacy {
 			),
 			ARRAY_A
 		) ?: [];
+		// Replace the applicant email with a one-way reference so re-running
+		// the eraser is idempotent (no row matches by email a second time)
+		// while preserving uniqueness for any reporting that counted
+		// distinct applications.
+		$erased_email = sprintf(
+			'erased-%s@example.invalid',
+			substr( hash( 'sha256', $email_address . wp_salt( 'auth' ) ), 0, 32 )
+		);
+
 		foreach ( $apps as $a ) {
 			$uploads = json_decode( (string) ( $a['uploaded_ids'] ?? '' ), true );
 			if ( is_array( $uploads ) ) {
@@ -242,6 +251,7 @@ final class Privacy {
 			ApplicationRepo::update(
 				(int) $a['id'],
 				[
+					'email'          => $erased_email,
 					'submitted_data' => '{}',
 					'uploaded_ids'   => null,
 				]
